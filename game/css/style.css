@@ -175,6 +175,33 @@ html, body { height: 100%; background: #060504; color: var(--hueso);
 .inv-slot .nombre { font-size: 10.5px; color: #b8ad8a; max-width: 58px; overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
 #bp-hint { font-size: 13.5px; line-height: 1.45; }
+/* v20: equipamiento vestible + efectos activos */
+#bp-equipo { display: flex; align-items: center; gap: 8px; margin: 4px 0 8px;
+  padding: 8px 10px; background: #0d0b07; border: 1px solid var(--borde); flex-wrap: wrap; }
+.bp-eq-label { color: var(--gris); font-size: 13px; letter-spacing: 1px; }
+.eq-slot { width: 44px; height: 44px; background: radial-gradient(circle at 50% 40%, #1d1710, #100c07 85%);
+  border: 2px solid #3d2f1c; border-radius: 4px; display: flex; align-items: center;
+  justify-content: center; cursor: pointer; position: relative;
+  box-shadow: inset 0 2px 6px rgba(0,0,0,.7); }
+.eq-slot:hover { border-color: var(--amarillo-osc); }
+.eq-slot.puesto { border-color: var(--amarillo-osc); }
+.eq-ph { color: #55503f; font-size: 11px; }
+#bp-efectos { display: flex; flex-wrap: wrap; gap: 5px; margin-left: auto; max-width: 55%;
+  justify-content: flex-end; }
+.fx { display: inline-flex; align-items: center; gap: 4px; background: #14200f;
+  border: 1px solid #3a5a2e; color: #a8d8a0; font-size: 12px; padding: 2px 8px;
+  border-radius: 9px; cursor: default; }
+.fx.fx-mal { background: #200f0f; border-color: #5a2e2e; color: #e8a09a; }
+
+/* v20: tooltips instantáneos (moodles a la izquierda, chips hacia arriba) */
+.tip-left, .tip-up { position: relative; }
+.tip-left:hover::after, .tip-up:hover::after {
+  content: attr(data-tip); position: absolute; z-index: 45; pointer-events: none;
+  background: #14120d; border: 1px solid var(--amarillo-osc); color: var(--hueso);
+  padding: 7px 10px; font-size: 13px; line-height: 1.4; width: max-content;
+  max-width: 250px; box-shadow: 0 0 14px rgba(0,0,0,.85); white-space: normal; }
+.tip-left:hover::after { right: calc(100% + 10px); top: 50%; transform: translateY(-50%); }
+.tip-up:hover::after { bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); }
 #ctrl-list { margin-top: 14px; color: var(--gris); font-size: 15px; line-height: 1.7;
   border-top: 1px solid var(--borde); padding-top: 10px; }
 #ctrl-list b { color: var(--hueso); letter-spacing: 1px; }
@@ -186,10 +213,13 @@ html, body { height: 100%; background: #060504; color: var(--hueso);
   display: flex; align-items: center; justify-content: center; z-index: 18; }
 .sound-row { display: flex; align-items: center; gap: 12px; margin: 12px 0; font-size: 13px; }
 .sound-row label { width: 130px; color: var(--hueso); }
-.sound-row input { flex: 1; -webkit-appearance: none; appearance: none; height: 4px;
+.sound-row input[type=range] { flex: 1; -webkit-appearance: none; appearance: none; height: 4px;
   background: #3a352a; outline: none; cursor: pointer; }
-.sound-row input::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
+.sound-row input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
   width: 13px; height: 13px; background: var(--amarillo); border: 1px solid #0a0906; cursor: pointer; }
+/* v20: el checkbox del dado se veía como un slider vacío — ahora es un checkbox */
+.chk-row input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--amarillo);
+  cursor: pointer; vertical-align: middle; margin-right: 6px; }
 .sound-row span { width: 36px; text-align: right; color: var(--gris); font-size: 12px; }
 .chk-row { flex: 1; color: var(--gris); font-size: 13px; cursor: pointer; }
 .chk-row input { accent-color: var(--amarillo); cursor: pointer; vertical-align: middle; }
@@ -236,7 +266,10 @@ html, body { height: 100%; background: #060504; color: var(--hueso);
 .modal-box h3 { color: var(--amarillo); font-size: 20px; margin-bottom: 12px; }
 .modal-box p { font-size: 17px; line-height: 1.5; margin-bottom: 10px; }
 .modal-box .warn { color: #e8a05a; font-size: 15px; }
-.modal-btns { display: flex; gap: 12px; align-items: center; margin-top: 14px; }
+.modal-btns { display: flex; gap: 10px; row-gap: 8px; align-items: center; margin-top: 14px;
+  flex-wrap: wrap; } /* v20: USAR/EMPUÑAR/Arrojar/Tirar/Cerrar caben en dos filas */
+#item-modal .btn-big { font-size: 11px !important; padding: 9px 16px !important; }
+#item-modal .btn-small { margin-top: 0; padding: 7px 12px; font-size: 15px; }
 
 /* ---------- diario ---------- */
 #journal-panel { position: absolute; top: 40px; right: 12px; width: 250px; max-height: 70%;
@@ -300,7 +333,10 @@ details.cdx > div, details.cdx > ol { padding: 6px 14px 12px; }
 .col-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
 .col-cuenta { width: 100%; color: var(--amarillo); font-size: 14px; margin-bottom: 2px; }
 .col-card { width: 78px; padding: 6px 3px 5px; background: #0f0e0a; text-align: center;
-  border: 1px solid var(--borde); font-size: 11.5px; line-height: 1.2; color: #cfc8b0; }
+  border: 1px solid var(--borde); font-size: 11.5px; line-height: 1.2; color: #cfc8b0;
+  position: relative; }
+.col-wiki { position: absolute; top: 1px; right: 2px; opacity: .55; line-height: 0; }
+.col-wiki:hover { opacity: 1; }
 .col-card img { image-rendering: pixelated; display: block; margin: 0 auto 4px; }
 .col-card.col-locked { color: #5a5546; }
 .col-nivel { border: 1px solid var(--borde); background: #0f0e0a; padding: 10px 14px;

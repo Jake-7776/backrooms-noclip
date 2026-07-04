@@ -32,11 +32,32 @@
  "chaqueta": {
   "id": "chaqueta",
   "nombre": "Chaqueta térmica",
-  "descripcion": "Anula el daño por frío de los niveles helados mientras la lleves.",
+  "descripcion": "Anula el daño por frío de los niveles helados. Hay que llevarla PUESTA (ranura de cuerpo, en la mochila).",
+  "equipo": "cuerpo",
   "efecto": {
    "pasivo": "abrigo"
   },
   "color": "#6090c0"
+ },
+ "mascara_gas": {
+  "id": "mascara_gas",
+  "nombre": "Máscara de gas",
+  "descripcion": "Filtra el aire viciado de las Backrooms. PUESTA (ranura de cara), reduce a la mitad el desgaste mental ambiental: zumbidos, esporas, miradas…",
+  "equipo": "cara",
+  "efecto": {
+   "pasivo": "aire"
+  },
+  "color": "#5a6a58"
+ },
+ "botas_reforzadas": {
+  "id": "botas_reforzadas",
+  "nombre": "Botas reforzadas",
+  "descripcion": "Botas de trabajo con suela firme. PUESTAS (ranura de pies): pisas seguro junto al agua traicionera y tus pasos alertan menos (detección −1).",
+  "equipo": "pies",
+  "efecto": {
+   "pasivo": "pisada"
+  },
+  "color": "#7a5c38"
  },
  "amuleto": {
   "id": "amuleto",

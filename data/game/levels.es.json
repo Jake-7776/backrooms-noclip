@@ -7,8 +7,8 @@
   "peligro": 1,
   "bioma": "pasillos",
   "tam": [
-   96,
-   96
+   150,
+   150
   ],
   "paleta": {
    "suelo": "#7a6b3d",
@@ -70,8 +70,7 @@
    "suelo": "moqueta_humeda"
   },
   "particulas": "polvo",
-  "sonido": "hum_clasico",
-  "infinito": true
+  "sonido": "hum_clasico"
  },
  "level-1": {
   "id": "level-1",
@@ -256,6 +255,13 @@
     "id": "tuberia",
     "n": [
      1,
+     1
+    ]
+   },
+   {
+    "id": "botas_reforzadas",
+    "n": [
+     0,
      1
     ]
    }
@@ -552,6 +558,13 @@
    },
    {
     "id": "guante_paralisis",
+    "n": [
+     0,
+     1
+    ]
+   },
+   {
+    "id": "mascara_gas",
     "n": [
      0,
      1

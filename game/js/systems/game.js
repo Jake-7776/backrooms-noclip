@@ -250,11 +250,15 @@
       world.ui.updateHUD();
     });
   }
-  // posesión total (mochila + manos) — los pasivos funcionan por llevarlo encima
+  // posesión total (mochila + manos + puesto) — los pasivos de bolsillo
+  // funcionan por llevarlos encima
   world.hasItem = (id) => world.player.inv.includes(id) ||
-    (world.player.manos || []).includes(id);
+    (world.player.manos || []).includes(id) ||
+    Object.values(world.player.equipo || {}).includes(id);
   // "en mano": linterna y armas solo funcionan empuñadas
   world.enMano = (id) => (world.player.manos || []).includes(id);
+  // "puesto": la ropa (chaqueta, máscara, botas) solo protege VESTIDA (v20)
+  world.equipado = (id) => Object.values(world.player?.equipo || {}).includes(id);
 
   // Remodelación REAL de una zona del nivel (propiedad no euclidiana):
   // regenera los tiles de un chunk lejos del jugador, valida que todas las
@@ -342,7 +346,8 @@
       x: 0, y: 0, rx: 0, ry: 0, dir: 'down', flip: false, rot: 2,
       salud: 100, cordura: 100, sed: 100, hambre: 100,
       sintonia: 0, instintos: [], umbrales: [],
-      inv: [], manos: [null, null], luz: false, viva: true,
+      inv: [], manos: [null, null], equipo: { cara: null, cuerpo: null, pies: null },
+      luz: false, viva: true,
     };
     world.journal = [];
     world.visited = [];
@@ -398,6 +403,7 @@
     world.luzBloqueada = false;
     world.escondido = null;
     world.ruido = null;
+    world._caminataT = 150; // turnos de caminata antes de que el nivel "ceda"
     if (!world.visited.includes(id)) world.visited.push(id);
     Profiles.registrarEntrada(id);
 
@@ -638,7 +644,37 @@
         (world.player.x !== world._ignoraExit.x || world.player.y !== world._ignoraExit.y))
       world._ignoraExit = null;
     const ex = world.map.exits.find((e) => e.x === world.player.x && e.y === world.player.y);
-    if (ex && !world._ignoraExit) world.ui.showExitModal(ex.def);
+    if (ex && !world._ignoraExit) {
+      // pared agrietada (v20): primero hay que ABRIRLA (ESPACIO)
+      if (ex.def._mec === 'romper' && !ex.def._abierta) {
+        if (!ex._avisado) {
+          ex._avisado = true;
+          world.log('La pared de aquí está AGRIETADA: suena hueca. Pulsa ESPACIO para intentar abrirla.', 'good');
+        }
+      } else world.ui.showExitModal(ex.def);
+    }
+
+    // salidas por CAMINATA (v20): algunos caminos de la wiki se cruzan ANDANDO
+    // («caminar sin rumbo hasta que…») — tras muchos turnos, el nivel cede
+    if ((world.map.caminatas || []).length && world.turn >= (world._caminataT || 150) && !world.busy) {
+      const defC = world.map.caminatas[0];
+      world._caminataT = world.turn + 90; // si lo rechazas, volverá a asomar
+      world.ui.showChoice(
+        'Tus pasos te llevan',
+        `Llevas una eternidad caminando y el paisaje empieza a CEDER. ${defC.texto}. Un paso más y no habrá vuelta al aquí-ahora.`,
+        [
+          {
+            label: 'SEGUIR ADELANTE',
+            cb: () => {
+              const i = world.map.caminatas.indexOf(defC);
+              if (i >= 0) world.map.caminatas.splice(i, 1);
+              crossExit(defC);
+            },
+          },
+          { label: 'Aún no', cb: () => {} },
+        ]
+      );
+    }
 
     // aviso al pisar un contenedor sin registrar
     const contAqui = (world.map.props || []).find(
@@ -687,7 +723,7 @@
       piensa('sint', (P.sintonia || 0) >= 85, (P.sintonia || 0) < 70,
         'Las paredes ya no me susurran. Me HABLAN. Y las entiendo.');
       if ((world.level.reglas || []).includes('frio') &&
-          world.turn % 38 === 12 && !world.hasItem('chaqueta'))
+          world.turn % 38 === 12 && !world.equipado('chaqueta'))
         Effects.bubble(P.x, P.y, 'Me castañetean los dientes…', P);
       if ((world.level.reglas || []).includes('calor') && world.turn % 44 === 20)
         Effects.bubble(P.x, P.y, 'Este calor me está cociendo vivo.', P);
@@ -822,19 +858,30 @@
       return;
     }
     world.log(`Golpeas a ${ent.def.nombre} con la tubería.`, 'good');
-    // retroceso de 1 casilla si el hueco está libre
-    const kx = ent.x + Math.sign(ent.x - world.player.x);
-    const ky = ent.y + Math.sign(ent.y - world.player.y);
-    const g = world.map.grid;
-    if (MapGen.walkable(MapGen.at(g, kx, ky)) &&
-        !world.entities.some((o) => o.viva && o !== ent && o.x === kx && o.y === ky) &&
-        !(world.player.x === kx && world.player.y === ky)) {
-      ent.x = kx; ent.y = ky;
+    // retroceso SOLO a veces (v20): si el golpe siempre empujara, el enemigo
+    // jamás llegaría a devolvértelo — el combate debe ser un intercambio
+    if (world.rng.chance(0.25)) {
+      const kx = ent.x + Math.sign(ent.x - world.player.x);
+      const ky = ent.y + Math.sign(ent.y - world.player.y);
+      const g = world.map.grid;
+      if (MapGen.walkable(MapGen.at(g, kx, ky)) &&
+          !world.entities.some((o) => o.viva && o !== ent && o.x === kx && o.y === ky) &&
+          !(world.player.x === kx && world.player.y === ky)) {
+        ent.x = kx; ent.y = ky;
+        world.log('El golpe lo hace retroceder.', 'good');
+      }
     }
   }
 
+  const FRASES_ESPERA = [
+    'Esperaré aquí un momento…', 'Descansaré un rato.', 'Puedo permitirme parar un segundo.',
+    'Un respiro. Solo uno.', 'Mejor no precipitarse.', 'Escucharé un momento…',
+  ];
   function wait() {
     if (world.busy || world.over) return;
+    if (window.Effects && Math.random() < 0.75)
+      Effects.bubble(world.player.x, world.player.y,
+        FRASES_ESPERA[Math.floor(Math.random() * FRASES_ESPERA.length)], world.player);
     worldStep();
   }
 
@@ -843,7 +890,11 @@
     // dentro de un escondite: ESPACIO sale
     if (world.escondido) { toggleEsconder(null); return; }
     const ex = world.map.exits.find((e) => e.x === world.player.x && e.y === world.player.y);
-    if (ex) { world.ui.showExitModal(ex.def); return; }
+    if (ex) {
+      if (ex.def._mec === 'romper' && !ex.def._abierta) { intentarRomper(ex); return; }
+      world.ui.showExitModal(ex.def);
+      return;
+    }
     // contenedores registrables
     const cont = (world.map.props || []).find(
       (p) => p.contenedor && !p.registrado && p.x === world.player.x && p.y === world.player.y
@@ -907,7 +958,7 @@
         d = 7;
       }
       if (d >= 14) {
-        const pool = ['agua_almendras', 'agua_almendras', 'botiquin', 'amuleto', 'linterna', 'chaqueta', 'tuberia', 'fuego_griego', 'guante_paralisis', 'trebol'];
+        const pool = ['agua_almendras', 'agua_almendras', 'botiquin', 'amuleto', 'linterna', 'chaqueta', 'mascara_gas', 'botas_reforzadas', 'tuberia', 'fuego_griego', 'guante_paralisis', 'trebol'];
         const id = pool[Math.min(pool.length - 1, Math.floor((d - 14) / 7 * pool.length + world.rng.int(0, 2)))];
         if (world.player.inv.length >= 6) {
           world.log(`Dado: ${d}. Hay algo útil… pero no te cabe nada más.`, 'event');
@@ -1143,12 +1194,29 @@
     world.map.items.push({ x: tx, y: ty, id });
     world.itemsVersion = (world.itemsVersion || 0) + 1;
     world.hacerRuido(tx, ty, 12);
+    // DISTRACCIÓN real (v20): lo que oye el golpe se va DE VERDAD hacia él
+    // unos turnos (aunque te estuviera cazando); el Cazador al menos se detiene
+    let distraidas = 0;
+    for (const e of world.entities) {
+      if (!e.viva) continue;
+      if (Math.abs(e.x - tx) + Math.abs(e.y - ty) > 12) continue;
+      if (e.def.comportamiento === 'cazador') {
+        e.paralizada = Math.max(e.paralizada, 2); // se para a ESCUCHAR
+        world.log('El Cazador se detiene en seco, escuchando el eco…', 'good');
+      } else {
+        e.distraida = 3;
+        e.estado = 'alerta';
+      }
+      distraidas++;
+    }
     if (window.Effects) {
       Effects.proyectil(world.player.x, world.player.y, tx, ty, '#d8c8a0');
       Effects.flash(tx, ty, '#d8c8a0');
     }
     if (window.Sfx) Sfx.play('golpe');
-    world.log(`Arrojas ${world.data.objects[id].nombre} lejos. El golpe resuena en los pasillos.`, 'event');
+    world.log(distraidas
+      ? `Arrojas ${world.data.objects[id].nombre} lejos. Algo se gira hacia el golpe.`
+      : `Arrojas ${world.data.objects[id].nombre} lejos. El golpe resuena en los pasillos.`, 'event');
     world.ui.updateHUD();
     worldStep();
   }
@@ -1183,6 +1251,71 @@
       if (window.Effects) Effects.particles(ox, oy, '#d9c66e', 12);
       worldStep();
     });
+  }
+
+  // pared agrietada (v20): la salida hay que ABRIRLA rompiendo el muro — a
+  // puñetazos cuesta (y duele); con una herramienta EN MANO es mucho más fácil
+  function intentarRomper(ex) {
+    const herramienta = world.enMano('tuberia');
+    world.ui.showChoice(
+      'Una pared agrietada',
+      `«${ex.def.texto}». La grieta recorre el muro de arriba abajo: suena HUECO al otro lado.`,
+      [
+        {
+          label: herramienta ? 'ROMPERLA con la tubería' : 'ROMPERLA a puñetazos',
+          cb: () => {
+            world.hacerRuido(world.player.x, world.player.y, 12);
+            world.rollDice(herramienta ? 'Descargas la tubería contra la grieta…' : 'Golpeas la grieta con los puños…', (d) => {
+              const umbral = herramienta ? 7 : 12;
+              if (d >= umbral) {
+                ex.def._abierta = true;
+                world.mapaVersion = (world.mapaVersion || 0) + 1; // el hueco se VE
+                world.log(`Dado: ${d}. ¡La pared CEDE! Una luz blanca se abre al otro lado.`, 'good');
+                if (window.Sfx) Sfx.play('derrumbe');
+                if (window.Effects) {
+                  Effects.doShake(5, 220);
+                  Effects.flash(world.player.x, world.player.y, '#ffffff');
+                }
+              } else if (herramienta) {
+                world.log(`Dado: ${d}. La tubería rebota. La grieta apenas crece. (Inténtalo otra vez.)`, 'event');
+              } else {
+                world.hurt(2, 'la pared', true);
+                world.log(`Dado: ${d}. Solo te abres los nudillos. Con una herramienta EN MANO sería más fácil.`, 'danger');
+              }
+              worldStep();
+            });
+          },
+        },
+        { label: 'Dejarla en paz', cb: () => {} },
+      ]
+    );
+  }
+
+  // ---------- equipamiento vestible (v20): cara / cuerpo / pies ----------
+  function ponerEquipo(slot) {
+    const id = world.player.inv[slot];
+    if (!id || world.over) return;
+    const def = world.data.objects[id];
+    if (!def.equipo) { world.log(`${def.nombre} no se puede vestir.`, 'event'); return; }
+    const eq = world.player.equipo;
+    const previo = eq[def.equipo];
+    world.player.inv.splice(slot, 1);
+    eq[def.equipo] = id;
+    if (previo) world.player.inv.push(previo); // intercambio: lo viejo a la mochila
+    world.log(`Te pones: ${def.nombre}.`, 'good');
+    if (window.Sfx) Sfx.play('ui');
+    world.ui.updateHUD();
+  }
+
+  function quitarEquipo(tipo) {
+    const id = world.player.equipo[tipo];
+    if (!id) return;
+    if (world.player.inv.length >= 6) { world.log('La mochila está llena: no puedes guardarlo.', 'event'); return; }
+    world.player.equipo[tipo] = null;
+    world.player.inv.push(id);
+    world.log(`Te quitas: ${world.data.objects[id].nombre}.`, 'event');
+    if (window.Sfx) Sfx.play('ui');
+    world.ui.updateHUD();
   }
 
   // ---------- esconderse (v18): taquillas y muebles registrados ----------
@@ -1319,6 +1452,7 @@
           salud: world.player.salud, cordura: world.player.cordura,
           sed: world.player.sed, hambre: world.player.hambre,
           inv: world.player.inv, manos: world.player.manos,
+          equipo: world.player.equipo,
           sintonia: world.player.sintonia, instintos: world.player.instintos,
           umbrales: world.player.umbrales,
         },
@@ -1345,6 +1479,7 @@
       sintonia: s.player.sintonia || 0, instintos: s.player.instintos || [],
       umbrales: s.player.umbrales || [],
       inv: s.player.inv, manos: s.player.manos || [null, null],
+      equipo: s.player.equipo || { cara: null, cuerpo: null, pies: null },
       luz: false, viva: true,
     };
     world.journal = s.journal;
@@ -1362,8 +1497,9 @@
   }
 
   window.Game = {
-    world, startRun, continueRun, loadSave, Profiles,
+    world, startRun, continueRun, loadSave, Profiles, INSTINTOS,
     tryMove, wait, interact, toggleLuz, useItem, crossExit,
     girar, avanzar, equipar, desequipar, usarMano, tirarItem, arrojarItem, noclip,
+    ponerEquipo, quitarEquipo,
   };
 })();

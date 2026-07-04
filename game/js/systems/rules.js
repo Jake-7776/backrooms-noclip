@@ -5,9 +5,9 @@
     zumbido: {
       nombre: 'Zumbido fluorescente',
       icono: '〰',
-      desc: 'El zumbido constante de las luces erosiona tu cordura.',
+      desc: 'El zumbido constante de las luces erosiona tu cordura. Una máscara de gas filtra la mitad.',
       turno(world, rng) {
-        if (world.turn % 20 === 0) world.sanity(-1);
+        if (world.turn % (world.equipado('mascara_gas') ? 40 : 20) === 0) world.sanity(-1);
       },
     },
     no_euclidiano: {
@@ -35,9 +35,9 @@
     frio: {
       nombre: 'Frío glacial',
       icono: '❄',
-      desc: 'El frío te daña lentamente. Una chaqueta térmica lo anula.',
+      desc: 'El frío te daña lentamente. Una chaqueta térmica PUESTA lo anula.',
       turno(world) {
-        if (world.turn % 8 === 0 && !world.hasItem('chaqueta')) world.hurt(1, 'el frío', true);
+        if (world.turn % 8 === 0 && !world.equipado('chaqueta')) world.hurt(1, 'el frío', true);
       },
     },
     oscuridad_total: {
@@ -71,9 +71,9 @@
     alucinaciones: {
       nombre: 'Alucinaciones',
       icono: '👁',
-      desc: 'Oyes y ves cosas que no existen. Tu cordura se resiente.',
+      desc: 'Oyes y ves cosas que no existen. Tu cordura se resiente. Una máscara de gas filtra la mitad.',
       turno(world, rng) {
-        if (world.turn % 25 === 0) world.sanity(-1);
+        if (world.turn % (world.equipado('mascara_gas') ? 50 : 25) === 0) world.sanity(-1);
         if (rng.chance(0.01)) {
           world.log(rng.pick([
             'Crujidos a tu espalda. No hay nada.',
@@ -88,9 +88,9 @@
     aislamiento: {
       nombre: 'Aislamiento',
       icono: '⌀',
-      desc: 'Este nivel te separa de todo ser vivo. La soledad pesa.',
+      desc: 'Este nivel te separa de todo ser vivo. La soledad pesa. Una máscara de gas filtra la mitad.',
       turno(world) {
-        if (world.turn % 25 === 0) world.sanity(-1);
+        if (world.turn % (world.equipado('mascara_gas') ? 50 : 25) === 0) world.sanity(-1);
       },
     },
     tiempo_raro: {
@@ -169,8 +169,9 @@
     agua_traicionera: {
       nombre: 'Charcos sirena',
       icono: '💧',
-      desc: 'El agua de este nivel atrae con fuerza gravitatoria a quien se acerca.',
+      desc: 'El agua de este nivel atrae con fuerza gravitatoria a quien se acerca. Unas botas reforzadas te anclan al suelo.',
       turno(world, rng) {
+        if (world.equipado('botas_reforzadas')) return; // pisada firme
         const g = world.map.grid, p = world.player;
         for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
           const v = MapGen.at(g, p.x + dx, p.y + dy);
@@ -185,9 +186,9 @@
     vigilado: {
       nombre: 'Escopofobia',
       icono: '👀',
-      desc: 'Todo en este nivel te observa. La cordura se desangra.',
+      desc: 'Todo en este nivel te observa. La cordura se desangra. Una máscara de gas filtra la mitad.',
       turno(world) {
-        if (world.turn % 12 === 0) world.sanity(-1);
+        if (world.turn % (world.equipado('mascara_gas') ? 24 : 12) === 0) world.sanity(-1);
       },
     },
   };

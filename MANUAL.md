@@ -47,6 +47,14 @@ fluorescentes**, bloom cinematográfico y polvo en suspensión. Alternativas por
 - **Volver atrás**: ya no hay tecla mágica. La única manera de regresar es **la puerta por la
   que llegaste** (queda marcada donde apareces) — y cada nivel se conserva TAL CUAL lo
   dejaste. Excepción: si CAÍSTE (agujero, trampilla, vacío), no hay vuelta: nadie escala eso.
+- **Salidas con mecánica propia (v20)**: las salidas ya no son solo puertas. Las que en la
+  wiki dicen «romper una pared» aparecen como una **pared agrietada** (suena hueca al
+  pisarla): ESPACIO para intentar romperla — a puñetazos cuesta y duele; con la tubería EN
+  MANO es mucho más fácil. Al ceder, se abre un boquete de luz blanca y puedes cruzar. Las
+  que dicen «caminar sin rumbo hasta…» no tienen casilla: tras MUCHOS turnos andando por el
+  nivel, el paisaje «cede» y te ofrece cruzar. Los mapas son ahora más grandes (el Level 0 es
+  ENORME y ya no "petardea": se genera entero de una vez con tu semilla) y las salidas están
+  repartidas por rincones opuestos — piérdete de verdad.
 - **Manos y mochila**: dos ranuras de mano (abajo a la derecha) + mochila de 6 huecos (`B`).
   La linterna y las armas solo funcionan **empuñadas**: arrastra el objeto a una mano — en el
   propio panel de la mochila o en el HUD — (o botón EMPUÑAR en su ficha). Clic en una mano la
@@ -58,6 +66,13 @@ fluorescentes**, bloom cinematográfico y polvo en suspensión. Alternativas por
   se descargan. Un objeto a 2 manos solo responde a `Q`.
 - **Tirar objetos**: en la ficha de cualquier objeto de la mochila (clic sobre él) está el
   botón «Tirar al suelo»: lo deja a tus pies y puedes recogerlo después.
+- **Equipamiento (ropa)**: la mochila tiene la fila «Vistiendo» con tres ranuras — **cara**
+  (máscara de gas: desgaste mental ambiental a la mitad), **cuerpo** (chaqueta térmica: anula
+  el frío) y **pies** (botas reforzadas: inmune a charcos sirena, detección −1). La ropa solo
+  protege PUESTA: arrástrala a su ranura o botón PONERSE en su ficha; clic en la ranura para
+  quitarla. Debajo verás tus **buffs y debuffs** activos — pasa el ratón para leer qué hacen.
+- **Iconos de estado**: pasa el ratón por los círculos de arriba a la derecha para ver
+  exactamente qué te aflige y cómo remediarlo.
 - **Cajas y contenedores**: taquillas, archivadores, neveras, cajas… TODOS se pueden
   registrar con ESPACIO (dado de botín). Ya no hay cajas de atrezzo que confundan.
   ¡Ojo!: registrar HACE RUIDO, y el ruido atrae a lo que ronda cerca.
@@ -86,8 +101,9 @@ No hay experiencia ni niveles de personaje: hay un **pacto silencioso con el lug
   Si te mueves ese turno, el golpe falla. El Cazador solo avisa la primera vez.
 - **Ruido**: registrar muebles, golpear (y fallar) hace ruido; las entidades que no te
   cazan van a investigar el sonido.
-- **Arrojar** (botón en la ficha del objeto): lanzas el objeto lejos, el golpe resuena y
-  distrae — la forma clásica de quitarte algo de encima. El objeto queda en el suelo.
+- **Arrojar** (botón en la ficha del objeto): lanzas el objeto lejos y el golpe DISTRAE de
+  verdad — las entidades cercanas van hacia el ruido 3 turnos (aunque te estén cazando), y
+  hasta el Cazador se detiene 2 turnos a escuchar. El objeto queda en el suelo.
 - **Despistar**: si una entidad pasa 3 turnos sin detectarte, abandona la caza.
 - **Esconderse**: sobre una taquilla/nevera/archivador YA REGISTRADO, pulsa ESPACIO para
   meterte dentro (y ESPACIO para salir). Si no te vieron entrar, pierden tu rastro; si te

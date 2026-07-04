@@ -245,6 +245,8 @@
       setTimeout(() => {
         world.player.inv.push('agua_almendras', 'botiquin', 'trebol');
         world.player.manos[0] = 'tuberia';
+        world.player.equipo.cuerpo = 'chaqueta';
+        world.player.equipo.cara = 'mascara_gas';
         world.ui.updateHUD();
         world.ui.toggleBackpack(true);
       }, 400);
@@ -312,6 +314,14 @@
         const instModal = document.getElementById('instinto-modal');
         if (instModal && instModal.style.display !== 'none') {
           document.querySelector('.inst-card')?.click();
+          acciones++;
+          return;
+        }
+        // elecciones libres (beber agua, caminata, romper pared…): responde algo
+        const choiceModal = document.getElementById('choice-modal');
+        if (choiceModal && choiceModal.style.display !== 'none') {
+          const btns = document.querySelectorAll('#choice-btns button');
+          if (btns.length) btns[Math.random() < 0.6 ? 0 : btns.length - 1].click();
           acciones++;
           return;
         }

@@ -97,8 +97,9 @@
     if (sint >= 30 && rng && e.def.comportamiento !== 'cazador' &&
         rng.chance((sint - 20) / 180)) return false;
 
-    // pies de moqueta: te detectan 2 casillas más tarde
-    const rMod = world.instinto && world.instinto('pies_moqueta') ? -2 : 0;
+    // pies de moqueta (−2) y botas reforzadas (−1): te detectan más tarde
+    const rMod = (world.instinto && world.instinto('pies_moqueta') ? -2 : 0) +
+      (world.equipado && world.equipado('botas_reforzadas') ? -1 : 0);
     const radio = Math.max(1, (d.radio ?? 6) + rMod);
     const ver = () => FOV.los(world.map.grid, e.x, e.y, world.player.x, world.player.y);
     switch (d.tipo) {
@@ -196,6 +197,13 @@
       e.preparando = false;
       stepAway(world, e);
       if (e.def.velocidad > 1) stepAway(world, e);
+      return;
+    }
+    // distraída por un objeto arrojado (v20): este turno va hacia el señuelo
+    if (e.distraida > 0) {
+      e.distraida--;
+      e.preparando = false;
+      if (world.ruido) stepHacia(world, e, world.ruido.x, world.ruido.y);
       return;
     }
 

@@ -71,22 +71,31 @@
     chaqueta: 'chaqueta', amuleto: 'cuadro', llave_nivel: 'llave',
     tuberia: 'tuberia', fuego_griego: 'fuego', guante_paralisis: 'guante',
     detector: 'antena', trebol: 'trebol',
+    mascara_gas: 'mascara', botas_reforzadas: 'bota',
   };
 
   function updateHUD() {
     if (!world.player || !world.level) return;
     renderManos();
     renderMoodles();
-    if ($('backpack-panel').style.display !== 'none') renderBackpack();
+    if ($('backpack-panel').style.display !== 'none') {
+      renderBackpack();
+      renderEquipo();
+      renderEfectos();
+    }
   }
 
   // ---------- moodles (v16): iconos de estado estilo Project Zomboid ----------
   // aparecen solo cuando el estado empeora; 3 niveles de gravedad por color
   const MOODLES = [
-    ['corazon', (p) => p.salud, [60, 35, 15], ['Herido', 'Malherido', 'Crítico']],
-    ['yin', (p) => p.cordura, [50, 35, 15], ['Inquieto', 'Alterado', 'Mente al límite']],
-    ['gota', (p) => p.sed, [50, 30, 10], ['Sediento', 'Muy sediento', 'Deshidratado']],
-    ['pan', (p) => p.hambre, [50, 30, 10], ['Hambriento', 'Famélico', 'Inanición']],
+    ['corazon', 'Salud', (p) => p.salud, [60, 35, 15], ['Herido', 'Malherido', 'Crítico'],
+      'Un botiquín (o el instinto Sangre amarilla) la recupera.'],
+    ['yin', 'Cordura', (p) => p.cordura, [50, 35, 15], ['Inquieto', 'Alterado', 'Mente al límite'],
+      'Descansa en niveles seguros, bebe agua de almendras o usa un recuerdo del hogar. A 0, te pierdes para siempre.'],
+    ['gota', 'Sed', (p) => p.sed, [50, 30, 10], ['Sediento', 'Muy sediento', 'Deshidratado'],
+      'Bebe agua de almendras (o arriésgate con los charcos). A 0, la deshidratación te mata.'],
+    ['pan', 'Hambre', (p) => p.hambre, [50, 30, 10], ['Hambriento', 'Famélico', 'Inanición'],
+      'Registra contenedores en busca de comida. A 0, la inanición te consume.'],
   ];
   function renderMoodles() {
     const cont = $('moodles');
@@ -95,19 +104,19 @@
     const sint = world.player.sintonia || 0;
     if (sint >= 10) {
       const d = document.createElement('div');
-      d.className = 'moodle moodle-sint';
-      d.title = `Sintonía ${sint}/100 — las Backrooms te reclaman (dificulta el escape)`;
+      d.className = 'moodle moodle-sint tip-left';
+      d.dataset.tip = `Sintonía ${sint}/100 — las Backrooms te reclaman. Las entidades corrientes te ignoran más… pero al ESCAPAR la realidad tira un dado contra tu Sintonía. El recuerdo del hogar la baja.`;
       if (window.Icons) d.appendChild(Icons.img('ojo', 20));
       cont.appendChild(d);
     }
-    for (const [icono, get, umbrales, nombres] of MOODLES) {
+    for (const [icono, etiqueta, get, umbrales, nombres, consejo] of MOODLES) {
       const v = get(world.player);
       let lvl = 0;
       for (let i = 0; i < umbrales.length; i++) if (v <= umbrales[i]) lvl = i + 1;
       if (!lvl) continue;
       const d = document.createElement('div');
-      d.className = 'moodle moodle-' + lvl;
-      d.title = nombres[lvl - 1];
+      d.className = 'moodle moodle-' + lvl + ' tip-left';
+      d.dataset.tip = `${nombres[lvl - 1]} — ${etiqueta} ${v}/100. ${consejo}`;
       if (window.Icons) d.appendChild(Icons.img(icono, 20));
       cont.appendChild(d);
     }
@@ -186,11 +195,79 @@
     }
   }
 
+  // ---------- equipamiento vestible (v20): cara / cuerpo / pies ----------
+  function renderEquipo() {
+    const eq = world.player.equipo || {};
+    for (const tipo of ['cara', 'cuerpo', 'pies']) {
+      const el = $('eq-' + tipo);
+      if (!el) continue;
+      el.innerHTML = '';
+      el.classList.toggle('puesto', !!eq[tipo]);
+      if (eq[tipo]) {
+        const def = world.data.objects[eq[tipo]];
+        if (window.Icons) el.appendChild(Icons.img(ICONOS_INV[eq[tipo]] || 'interrogante', 26));
+        el.title = `${def.nombre} (clic: quitártelo)`;
+      } else {
+        const ph = document.createElement('span');
+        ph.className = 'eq-ph';
+        ph.textContent = tipo;
+        el.appendChild(ph);
+        el.title = `Ranura de ${tipo} (arrastra aquí una prenda)`;
+      }
+    }
+  }
+
+  // buffs y debuffs activos del personaje (v20) — con descripción al pasar el ratón
+  function renderEfectos() {
+    const cont = $('bp-efectos');
+    if (!cont) return;
+    cont.innerHTML = '';
+    const p = world.player;
+    const chip = (icono, nombre, tip, mala) => {
+      const s = document.createElement('span');
+      s.className = 'fx tip-up' + (mala ? ' fx-mal' : '');
+      if (window.Icons && Icons.has(icono)) s.appendChild(Icons.img(icono, 13));
+      s.appendChild(document.createTextNode(' ' + nombre));
+      s.dataset.tip = tip;
+      cont.appendChild(s);
+    };
+    // instintos (buffs de la Sintonía)
+    for (const id of p.instintos || []) {
+      const inst = Game.INSTINTOS?.[id];
+      if (inst) chip(inst.icono, inst.nombre, inst.desc, false);
+    }
+    // pasivos por llevarlos encima / puestos
+    const PASIVOS = {
+      trebol: ['trebol', 'Suerte', '+2 a todas tus tiradas de dado.'],
+      detector: ['antena', 'Detector', 'Entidades cercanas visibles en el mapa (M).'],
+      chaqueta: ['chaqueta', 'Abrigo', 'PUESTA: el frío no te daña.'],
+      mascara_gas: ['mascara', 'Aire filtrado', 'PUESTA: desgaste mental ambiental a la mitad.'],
+      botas_reforzadas: ['bota', 'Pisada firme', 'PUESTAS: inmune a charcos sirena · detección −1.'],
+    };
+    for (const [id, [icono, nombre, tip]] of Object.entries(PASIVOS)) {
+      const esRopa = !!world.data.objects[id]?.equipo;
+      if (esRopa ? world.equipado(id) : world.hasItem(id)) chip(icono, nombre, tip, false);
+    }
+    if (p.luz) chip('linterna', 'Linterna', '+4 de visión… y atrae a las Deathmoths.', false);
+    // debuffs: estados y reglas del nivel que te afectan AHORA
+    if (p.salud < 60) chip('corazon', 'Herido', `Salud ${p.salud}/100. Busca un botiquín.`, true);
+    if (p.cordura < 50) chip('yin', 'Mente frágil', `Cordura ${p.cordura}/100. Descansa en niveles seguros o usa un recuerdo del hogar.`, true);
+    if (p.sed < 50) chip('gota', 'Sed', `Sed ${p.sed}/100. Bebe agua de almendras.`, true);
+    if (p.hambre < 50) chip('pan', 'Hambre', `Hambre ${p.hambre}/100. Encuentra comida.`, true);
+    if ((p.sintonia || 0) >= 20) chip('ojo', `Sintonía ${p.sintonia}`, 'Las Backrooms te reclaman: las entidades te ignoran más… pero escapar es más difícil.', true);
+    for (const rid of world.level?.reglas || []) {
+      const r = window.Rules?.get(rid);
+      if (!r || !r.turno) continue; // solo las que actúan cada turno
+      const id2 = window.Icons ? (Icons.has(r.icono) ? r.icono : Icons.deEmoji(r.icono)) : null;
+      chip(id2 || 'interrogante', r.nombre, r.desc, true);
+    }
+  }
+
   function backpackAbierta() { return $('backpack-panel').style.display !== 'none'; }
   function toggleBackpack(force) {
     const vis = force !== undefined ? force : !backpackAbierta();
     $('backpack-panel').style.display = vis ? 'flex' : 'none';
-    if (vis) { renderBackpack(); renderManos(); }
+    if (vis) { renderBackpack(); renderManos(); renderEquipo(); renderEfectos(); }
     if (window.Sfx) Sfx.play('ui');
     if (world.level && !world.over) {
       if (vis) world.busy = true;
@@ -225,7 +302,24 @@
     e.preventDefault();
     const s = e.dataTransfer.getData('text/plain');
     if (s.startsWith('mano:')) Game.desequipar(parseInt(s.slice(5), 10));
+    else if (s.startsWith('eq:')) Game.quitarEquipo(s.slice(3));
   });
+
+  // ranuras de ropa (v20): clic quita; soltar un objeto arrastrado lo pone
+  for (const tipo of ['cara', 'cuerpo', 'pies']) {
+    const el = $('eq-' + tipo);
+    if (!el) continue;
+    el.onclick = () => Game.quitarEquipo(tipo);
+    el.draggable = true;
+    el.addEventListener('dragstart', (e) => e.dataTransfer.setData('text/plain', 'eq:' + tipo));
+    el.addEventListener('dragover', (e) => e.preventDefault());
+    el.addEventListener('drop', (e) => {
+      e.preventDefault();
+      const s = e.dataTransfer.getData('text/plain');
+      if (s !== '' && !s.startsWith('mano:') && !s.startsWith('eq:'))
+        Game.ponerEquipo(parseInt(s, 10));
+    });
+  }
 
   // ---------- ventana de información de objeto ----------
   function efectoLegible(def) {
@@ -238,7 +332,9 @@
     if (e.activo === 'fuego') partes.push('USO ÚNICO: quema (−30) y ahuyenta todo en radio 3');
     if (e.activo === 'paralisis') partes.push('USO ÚNICO: paraliza 6 turnos a lo adyacente');
     if (e.pasivo === 'arma') partes.push('PASIVO: muévete HACIA una entidad adyacente para golpearla');
-    if (e.pasivo === 'abrigo') partes.push('PASIVO: anula el daño por frío');
+    if (e.pasivo === 'abrigo') partes.push('PUESTA (cuerpo): anula el daño por frío');
+    if (e.pasivo === 'aire') partes.push('PUESTA (cara): reduce a la mitad el desgaste mental ambiental');
+    if (e.pasivo === 'pisada') partes.push('PUESTAS (pies): inmune a charcos sirena · detección −1');
     if (e.pasivo === 'detector') partes.push('PASIVO: entidades cercanas visibles en el minimapa');
     if (e.pasivo === 'suerte') partes.push('PASIVO: +2 a todas tus tiradas de dado');
     if (e.pasivo === 'llave') partes.push('Se gasta al abrir una puerta de acero en The Hub');
@@ -269,8 +365,13 @@
     // acción se tragaba sin hacer nada (bug v16)
     btnUse.onclick = () => { cerrarItemInfo(); toggleBackpack(false); Game.useItem(slot); };
     const btnEq = $('btn-item-equip');
-    btnEq.style.display = def.manos ? 'inline-block' : 'none';
-    btnEq.onclick = () => { cerrarItemInfo(); Game.equipar(slot); };
+    btnEq.style.display = (def.manos || def.equipo) ? 'inline-block' : 'none';
+    btnEq.textContent = def.equipo ? 'PONERSE' : 'EMPUÑAR';
+    btnEq.onclick = () => {
+      cerrarItemInfo();
+      if (def.equipo) Game.ponerEquipo(slot);
+      else Game.equipar(slot);
+    };
     $('btn-item-drop').onclick = () => { cerrarItemInfo(); Game.tirarItem(slot); };
     $('btn-item-throw').onclick = () => { cerrarItemInfo(); toggleBackpack(false); Game.arrojarItem(slot); };
     $('btn-item-close').onclick = cerrarItemInfo;
@@ -560,6 +661,14 @@
       nom.textContent = visto ? def.nombre : '???';
       card.appendChild(nom);
       if (visto) card.title = def.descripcion || def.nombre;
+      if (visto && def.url && window.Icons) {
+        const a = document.createElement('a');
+        a.className = 'col-wiki';
+        a.href = def.url; a.target = '_blank'; a.rel = 'noopener';
+        a.title = 'Ficha real en la wiki ↗';
+        a.appendChild(Icons.img('interrogante', 12));
+        card.appendChild(a);
+      }
       entEl.appendChild(card);
     }
     $('cdx-n-ent').textContent = `${vistas}/${ents.length}`;
@@ -580,6 +689,14 @@
       nom.textContent = visto ? def.nombre : '???';
       card.appendChild(nom);
       if (visto) card.title = def.descripcion || def.nombre;
+      if (visto && def.url && window.Icons) {
+        const a = document.createElement('a');
+        a.className = 'col-wiki';
+        a.href = def.url; a.target = '_blank'; a.rel = 'noopener';
+        a.title = 'Ficha real en la wiki ↗';
+        a.appendChild(Icons.img('interrogante', 12));
+        card.appendChild(a);
+      }
       objEl.appendChild(card);
     }
     $('cdx-n-obj').textContent = `${habidos}/${objs.length}`;

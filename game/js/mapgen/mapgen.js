@@ -362,9 +362,27 @@
     invernadero: (w, h, rng) => genInvernadero(w, h, rng),
   };
 
+  // mecánicas de salida derivadas del texto de la wiki (v20): las salidas no
+  // son solo puertas — romper paredes agrietadas, caminar hasta perderte…
+  function mecanicaDe(s) {
+    if (s.mecanica) return s.mecanica;
+    const t = (s.texto || '').toLowerCase();
+    if (/(romp|derrib|golpea|atraviesa|agriet)[^.]*(pared|muro)|pared (falsa|débil|agrietada)/.test(t)) return 'romper';
+    if (/caminar sin rumbo|camina[r]? (durante|hasta|lejos)|andar (durante|hasta|sin)|deambul|vagar? (por|durante|hasta)|durante horas|durante días|kilómetros/.test(t)) return 'caminata';
+    return null;
+  }
+
   // ---------- generación completa de un nivel ----------
   function generate(levelDef, rng) {
-    const [w, h] = levelDef.tam;
+    let [w, h] = levelDef.tam;
+    // v20: los niveles con varias salidas CRECEN — que te sientas perdido de
+    // verdad y cada salida quede en su propio rincón del nivel
+    const nSal = (levelDef.salidas || []).length;
+    const esc = nSal >= 5 ? 1.45 : nSal >= 3 ? 1.25 : 1;
+    if (esc > 1) {
+      w = Math.min(190, Math.round(w * esc));
+      h = Math.min(190, Math.round(h * esc));
+    }
     const gen = GENS[levelDef.bioma] ?? GENS.pasillos;
     let g = gen(w, h, rng, levelDef);
     keepLargest(g);
@@ -380,23 +398,46 @@
     const reach = floors.filter(([x, y]) => dist[y * g.w + x] > 0);
     const far = reach.slice().sort((a, b) => dist[b[1] * g.w + b[0]] - dist[a[1] * g.w + a[0]]);
 
-    // salidas: cada una en un punto lejano distinto; se prefieren casillas con
-    // pared al norte para que las puertas queden pegadas a la pared
+    // salidas (v20): REPARTIDAS por el nivel — cada una elige el punto que
+    // maximiza su distancia mínima al spawn Y a las salidas ya colocadas.
+    // Se acabaron los racimos de puertas juntas.
     const exits = [];
-    const usable = (levelDef.salidas || []).filter((s) => s.tipo !== 'void');
-    const farPool = far.slice(0, Math.max(usable.length * 10, 60));
-    const shuffled = rng.shuffle(farPool);
-    const conPared = shuffled.filter(([x, y]) => at(g, x, y - 1) === T.PARED);
-    const sinPared = shuffled.filter(([x, y]) => at(g, x, y - 1) !== T.PARED);
-    // las puertas/elementos de pared EXIGEN pared al norte; trampillas/escaleras van libres
-    const esDeSuelo = (s) => /suelo|caer|agujero|fosa|hoyo|trampilla|pozo|precipicio|fall|escalera|ascensor|elevador/i.test(s.texto || '');
-    let iPared = 0, iLibre = 0;
-    usable.forEach((s) => {
-      let p;
-      if (esDeSuelo(s)) p = sinPared[iLibre++ % Math.max(1, sinPared.length)] ?? conPared[iPared++ % Math.max(1, conPared.length)];
-      else p = conPared[iPared++ % Math.max(1, conPared.length)] ?? sinPared[iLibre++ % Math.max(1, sinPared.length)];
-      if (p) exits.push({ x: p[0], y: p[1], def: s });
-    });
+    const caminatas = []; // salidas SIN casilla: se cruzan caminando mucho
+    const usable = [];
+    for (const s of levelDef.salidas || []) {
+      if (s.tipo === 'void') continue;
+      s._mec = mecanicaDe(s);
+      if (s._mec === 'caminata') { caminatas.push(s); continue; }
+      usable.push(s);
+    }
+    // pool ANCHO: toda casilla a más del 45% de la distancia máxima al spawn —
+    // cubre regiones opuestas del nivel, no solo el rincón más profundo
+    const maxDist = far.length ? dist[far[0][1] * g.w + far[0][0]] : 0;
+    const farPool = reach.filter(([x, y]) => dist[y * g.w + x] >= Math.max(12, maxDist * 0.45));
+    const conPared = farPool.filter(([x, y]) => at(g, x, y - 1) === T.PARED);
+    const sinPared = farPool.filter(([x, y]) => at(g, x, y - 1) !== T.PARED);
+    // puertas/grietas EXIGEN pared al norte; trampillas/escaleras van libres
+    const esDeSuelo = (s) => s._mec !== 'romper' &&
+      /suelo|caer|agujero|fosa|hoyo|trampilla|pozo|precipicio|fall|escalera|ascensor|elevador/i.test(s.texto || '');
+    const puestas = [];
+    const elegir = (pool) => {
+      let best = null, bestScore = -1;
+      for (const p of pool) {
+        if (puestas.some((q) => Math.abs(q[0] - p[0]) + Math.abs(q[1] - p[1]) < 3)) continue;
+        let score = dist[p[1] * g.w + p[0]]; // lejos del spawn…
+        for (const q of puestas)             // …y lejos de las otras salidas
+          score = Math.min(score, Math.abs(p[0] - q[0]) + Math.abs(p[1] - q[1]));
+        if (score > bestScore) { bestScore = score; best = p; }
+      }
+      return best;
+    };
+    for (const s of usable) {
+      const pool = esDeSuelo(s)
+        ? (sinPared.length ? sinPared : conPared)
+        : (conPared.length ? conPared : sinPared);
+      const p = elegir(pool);
+      if (p) { puestas.push(p); exits.push({ x: p[0], y: p[1], def: s }); }
+    }
 
     // objetos
     const items = [];
@@ -469,7 +510,7 @@
       }
     }
 
-    return { w, h, grid: g, spawn, exits, items, entitySpawns, props, dist };
+    return { w, h, grid: g, spawn, exits, items, entitySpawns, props, dist, caminatas };
   }
 
   window.MapGen = { T, generate, walkable, at, bfsDist };

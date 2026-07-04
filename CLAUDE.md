@@ -160,6 +160,29 @@ mecánicas — tipos, % de vacío de `riesgoVoid`, sin-retorno con la MISMA rege
 esSinRetorno de game.js, nota de la puerta de retorno persistente —, buscador, saltos
 clicables); regenerar tras tocar levels.es.json.
 
+**v20 — mecánicas de salida, equipo vestible y Level 0 gigante**: `mecanicaDe(s)` en
+mapgen deriva del texto de la wiki (o campo `mecanica` en la ficha): `romper` = pared
+agrietada (exige pared norte; `def._mec`/`def._abierta`; ESPACIO → `intentarRomper` con
+dado — tubería en mano umbral 7, puños 12 y −2 salud; al abrir `mapaVersion++` y el hueco
+blanco brilla con bloom — PINTORES.grieta/boquete en render3d y bloque en drawExit 2D);
+`caminata` = SIN casilla (`map.caminatas`): a los `world._caminataT` (150) turnos en el
+nivel, showChoice ofrece cruzar (reaparece cada 90 si la rechazas). Level 0 = 150×150 SIN
+`infinito` (el sistema de ventana deslizante queda dormido — nada lo usa; el petardeo de
+expansión desaparece por diseño). Mapas ESCALADOS por nº de salidas (≥3 ×1.25, ≥5 ×1.45,
+cap 190) y salidas REPARTIDAS: pool ancho (dist ≥ 45% del máx) + greedy max-min contra
+spawn y salidas ya puestas. **Equipo vestible**: `player.equipo {cara,cuerpo,pies}`,
+`world.equipado(id)`, `Game.ponerEquipo/quitarEquipo`, fila «Vistiendo» en la mochila
+(drag + PONERSE en ficha); chaqueta equipo:cuerpo (frío exige PUESTA), `mascara_gas`
+(drenajes de cordura ambientales ÷2 en rules), `botas_reforzadas` (inmune charcos sirena,
+detección −1). `#bp-efectos` = chips de buffs/debuffs con tooltip (Game.INSTINTOS
+exportado). Tooltips instantáneos CSS: `.tip-left`/`.tip-up` + `data-tip` (moodles con
+consejo). Arrojar DISTRAE de verdad: `e.distraida=3` (van al ruido aunque cacen) y el
+Cazador `paralizada=2`. Golpe de tubería: retroceso solo 25% (si no, el telegraph enemigo
+nunca conectaba). X = bocadillo de espera. Códice: icono-interrogante → wiki real en cartas
+descubiertas. FIX: el checkbox del dado era invisible (los estilos de slider de .sound-row
+pisaban todo input → ahora `input[type=range]`). El selftest responde choice-modal
+(60% primera opción) — sin él se atascaba en la caminata del L0.
+
 (Todos existen y están committeados. v3: render cenital con paredes finas autotile en `tiles.js`/`render.js`,
 pixel-art data-driven en `sprites.js` con override PNG desde `game/assets/sprites/`, efectos de combate
 en `effects.js`, props/contenedores registrables en `mapgen.js`/`game.js`.)

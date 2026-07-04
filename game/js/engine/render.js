@@ -253,6 +253,40 @@
     const pulse = 0.6 + Math.sin(t / 400) * 0.25;
     const col = ex.def.tipo === 'escape' ? '#6ae86a' : ex.def.tipo === 'sellada' ? '#666666' : '#e8c95a';
     if (ex.def.ritual) { drawRitual(ex, x, y, t, col, pulse); return; }
+
+    // pared AGRIETADA (v20): la salida hay que romperla; abierta = hueco de luz
+    if (ex.def._mec === 'romper') {
+      ctx.save();
+      const by = northWall ? y - 37 : y - 2;
+      if (ex.def._abierta) {
+        ctx.shadowColor = '#ffffff'; ctx.shadowBlur = 16 * pulse;
+        ctx.fillStyle = '#0c0a06';                    // boquete
+        ctx.fillRect(cx - 13, by, 26, 39);
+        ctx.fillStyle = `rgba(255,255,255,${0.65 + pulse * 0.3})`; // luz blanca
+        ctx.fillRect(cx - 9, by + 3, 18, 33);
+      } else {
+        ctx.strokeStyle = 'rgba(20,16,10,0.85)';      // la grieta
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(cx - 1, by + 1);
+        ctx.lineTo(cx - 5, by + 10); ctx.lineTo(cx + 2, by + 17);
+        ctx.lineTo(cx - 3, by + 26); ctx.lineTo(cx + 4, by + 33); ctx.lineTo(cx + 1, by + 38);
+        ctx.stroke();
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(cx - 5, by + 10); ctx.lineTo(cx - 11, by + 14);
+        ctx.moveTo(cx + 2, by + 17); ctx.lineTo(cx + 9, by + 19);
+        ctx.moveTo(cx - 3, by + 26); ctx.lineTo(cx - 10, by + 30);
+        ctx.stroke();
+        ctx.globalAlpha = 0.25 + pulse * 0.2;         // respira un poco de luz
+        ctx.strokeStyle = '#fff8e0';
+        ctx.beginPath();
+        ctx.moveTo(cx - 1, by + 2); ctx.lineTo(cx - 4, by + 10); ctx.lineTo(cx + 1, by + 17);
+        ctx.stroke();
+      }
+      ctx.restore();
+      return;
+    }
     const style = exitStyle(ex.def);
     ctx.save();
 

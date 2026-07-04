@@ -241,6 +241,44 @@
       x.fillStyle = '#324a3e';
       x.fillRect(0, 10, w, 5); x.fillRect(0, 30, w, 5);
     }),
+    grieta: () => lienzo(44, 64, (x, w, h) => {
+      // muro agrietado (fondo transparente: se pega sobre la pared real)
+      x.strokeStyle = 'rgba(16,12,8,0.9)';
+      x.lineWidth = 3;
+      x.beginPath();
+      x.moveTo(w / 2, 2);
+      x.lineTo(w / 2 - 6, 16); x.lineTo(w / 2 + 4, 28);
+      x.lineTo(w / 2 - 4, 42); x.lineTo(w / 2 + 6, 54); x.lineTo(w / 2 + 2, h - 2);
+      x.stroke();
+      x.lineWidth = 1.5;
+      x.beginPath();
+      x.moveTo(w / 2 - 6, 16); x.lineTo(w / 2 - 15, 22);
+      x.moveTo(w / 2 + 4, 28); x.lineTo(w / 2 + 14, 31);
+      x.moveTo(w / 2 - 4, 42); x.lineTo(w / 2 - 13, 48);
+      x.moveTo(w / 2 + 6, 54); x.lineTo(w / 2 + 13, 58);
+      x.stroke();
+      x.globalAlpha = 0.35;                          // un hilo de luz se cuela
+      x.strokeStyle = '#fff8e0';
+      x.lineWidth = 1;
+      x.beginPath();
+      x.moveTo(w / 2 - 1, 4); x.lineTo(w / 2 - 5, 16); x.lineTo(w / 2 + 3, 28);
+      x.stroke();
+    }),
+    boquete: () => lienzo(44, 64, (x, w, h) => {
+      // pared ROTA: boquete negro con luz blanca dentro (florece con el bloom)
+      x.fillStyle = '#0a0806';
+      x.beginPath();
+      x.moveTo(6, 8); x.lineTo(16, 3); x.lineTo(30, 6); x.lineTo(w - 5, 14);
+      x.lineTo(w - 8, 40); x.lineTo(w - 4, h - 8); x.lineTo(20, h - 3);
+      x.lineTo(5, h - 12); x.lineTo(8, 30);
+      x.closePath(); x.fill();
+      x.fillStyle = '#ffffff';                       // la luz del otro lado
+      x.beginPath();
+      x.moveTo(12, 14); x.lineTo(26, 9); x.lineTo(w - 10, 18);
+      x.lineTo(w - 12, 42); x.lineTo(w - 9, h - 13); x.lineTo(20, h - 9);
+      x.lineTo(10, h - 17); x.lineTo(12, 32);
+      x.closePath(); x.fill();
+    }),
     planta: () => lienzo(40, 44, (x, w, h) => {
       // helecho: tallos con hojas (fondo transparente)
       for (let i = 0; i < 6; i++) {
@@ -538,6 +576,24 @@
       const estilo = Render.exitStyle(ex.def);
       const col = ex.def.tipo === 'escape' ? '#6ae86a' : ex.def.tipo === 'sellada' ? '#8a8a86' : '#e8c95a';
       const rit = ex.def.ritual;
+
+      // pared AGRIETADA (v20): panel pegado al muro; rota = boquete con luz
+      // blanca que FLORECE con el bloom (material sin tone mapping)
+      if (ex.def._mec === 'romper') {
+        const abierta = !!ex.def._abierta;
+        const t2 = pintado(abierta ? 'p-boquete' : 'p-grieta',
+          abierta ? PINTORES.boquete : PINTORES.grieta);
+        const m = new THREE.Mesh(
+          new THREE.PlaneGeometry(0.95, 1.9),
+          abierta
+            ? new THREE.MeshBasicMaterial({ map: t2, transparent: true, toneMapped: false })
+            : new THREE.MeshLambertMaterial({ map: t2, transparent: true })
+        );
+        // plano pegado a la cara sur del muro norte (mirando al jugador)
+        m.position.set(ex.x + 0.5, 0.95, paredNorte ? ex.y + 0.03 : ex.y + 0.5);
+        grupo.add(m);
+        return;
+      }
 
       if (rit === 'nave') {
         // pedestal 3D con la nave encima (billboard detallado existente)

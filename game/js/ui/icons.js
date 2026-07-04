@@ -210,6 +210,14 @@
     '.........b..', '........bb..', '.......bbb..', '......bbb...',
     '.....bbb....', '....bbb.....', '...bbb......', '..hh........',
     '.hhh........', '.hh.........', '............', '............'] };
+  D.mascara = { pal: { g: '#5a6a58', G: '#39443a', v: '#a8c0b0', f: '#2a3028' }, m: [
+    '............', '...gggggg...', '..gggggggg..', '..gvvggvvg..',
+    '..gvvggvvg..', '..gggggggg..', '..gGGggGGg..', '...gGGGGg...',
+    '....gffg....', '....ffff....', '....ffff....', '............'] };
+  D.bota = { pal: { b: '#7a5c38', B: '#54401f', s: '#3a2f18' }, m: [
+    '............', '....bb......', '....bbb.....', '....bbb.....',
+    '....bbb.....', '....bbbb....', '....bbbbbb..', '....bbbbbb..',
+    '...BbbbbbB..', '..ssssssss..', '..ssssssss..', '............'] };
   // mano IZQUIERDA vista desde atrás (pulgar hacia dentro); la derecha se espeja
   D.mano = { pal: { p: '#d8a878', P: '#b08050', m: '#5f7454' }, m: [
     '............', '...p.p.p....', '..pppppp....', '..pppppp.p..',
