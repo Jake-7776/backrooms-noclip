@@ -8,24 +8,21 @@
   let listo = false;
   let reintento = null;
   let inputChat = null;
-  // v22 — movimiento libre: estado de input y reconciliación
+  // v24 — EL MOVIMIENTO ES DEL CLIENTE (el servidor valida): aquí se integra
+  // la física local (input vectorial o intención av/giro de 3ª persona) y se
+  // REPORTA la posición ~15 veces/s ({t:'p'}). Sin reconciliación: lo que ves
+  // es donde estás. El servidor solo interviene si un informe es imposible
+  // (velocidad, paredes, teleport) devolviendo 'mueve' con `sec`.
   const input = { dx: 0, dy: 0 };
-  let inputEnviado = { dx: 0, dy: 0 };
-  // v23.7 — 3ª persona por INTENCIÓN: av/giro discretos; el rumbo lo integran
-  // cliente y servidor con las mismas constantes (misma curva, cero deriva)
   const mov = { av: 0, giro: 0 };
-  let movEnviado = { av: 0, giro: 0 };
-  let modoMov = false; // true si el último gesto fue de intención (3ªP)
-  let rotEnviada = 0, rotUltEnvio = 0;
-  let tileFov = null; // último tile con FOV calculado
-  // v23 — rastro de posiciones locales para la reconciliación (ver
-  // reconciliar()): la posición del servidor siempre llega VIEJA; compararla
-  // contra el presente arrastra al jugador hacia atrás mientras corre
-  let rtt = 100;           // ms ida y vuelta (medido con ping/pong; telemetría)
+  let modoMov = false;   // true si el último gesto fue de intención (3ªP)
+  let sec = 0;           // nº de teleport del servidor: los informes viejos caducan
+  let repX = 0, repY = 0, repRot = 0, repT = 0; // último informe enviado
+  let tileFov = null;    // último tile con FOV calculado
+  let rtt = 100;         // ms ida y vuelta (medido con ping/pong; telemetría)
   let pingTimer = null;
-  const historia = [];     // [{t, x, y}] de la predicción local (~1.2 s)
-  const corr = { x: 0, y: 0 }; // corrección pendiente: se aplica REPARTIDA por frames
-  let ultimoError = null;      // último rechazo del servidor (lo muestra el título)
+  let ultimoError = null; // último rechazo del servidor (lo muestra el título)
+  const r2 = (v) => Math.round(v * 100) / 100;
 
   // fuerza la recarga real de los scripts (sin caché) y reinicia la página.
   // Guarda de sesión: si tras recargar seguimos con versión vieja, no ciclar.
@@ -70,7 +67,7 @@
     const params = new URLSearchParams(location.search);
     ws = new WebSocket(urlServidor());
     ws.onopen = () => enviar({
-      t: 'hola', nombre, token: token(), v: 5, // debe coincidir con protocolo.js
+      t: 'hola', nombre, token: token(), v: 6, // debe coincidir con protocolo.js
       nivel: params.get('nivel') || undefined, // puerta de desarrollo (solo MMO_DEV=1)
     });
     ws.onmessage = (ev) => {
@@ -143,28 +140,21 @@
       }
       case 'entra': if (listo) Otros.entra(m); break;
       case 'sale': if (listo) Otros.sale(m.id); break;
-      case 'mueve': // teleports: spawn, respawn, corrección dura
+      case 'mueve': // teleports: spawn, respawn, corrección (informe ilegal)
         if (!listo) return;
         if (m.id === miId) {
           w.player.x = m.x; w.player.y = m.y;
           w.player.rx = m.x; w.player.ry = m.y;
-          historia.length = 0;
-          corr.x = 0; corr.y = 0;
+          if (m.sec !== undefined) sec = m.sec;
+          repX = m.x; repY = m.y; // el próximo informe parte de aquí
           fov(w);
         } else Otros.mueve(m.id, m.x, m.y);
         break;
       case 'pos': // v22: lote de posiciones del tick (jugadores y entidades)
         if (!listo) return;
         for (const [id, x, y, rot] of m.j || []) {
-          if (id === miId) {
-            reconciliar(w, x, y);
-            // rumbo: converger suave hacia el del servidor SOLO sin girar
-            // (girando, el suyo va con retraso y pelearía con el volante)
-            if (rot !== undefined && !mov.giro && modoMov) {
-              const dr = Fisica.normAng(rot - (w.player.rot || 0));
-              if (Math.abs(dr) > 0.02) w.player.rot = Fisica.normAng((w.player.rot || 0) + dr * 0.25);
-            }
-          } else Otros.pos(id, x, y, rot);
+          // v24: la posición propia es NUESTRA — el eco del servidor se ignora
+          if (id !== miId) Otros.pos(id, x, y, rot);
         }
         for (const [uid, x, y] of m.e || []) {
           const e = entidadDe(uid);
@@ -426,13 +416,11 @@
     try { Game.Profiles.registrarEntrada(m.nivel); } catch (e) {}
     w.itemsVersion = (w.itemsVersion || 0) + 1;
     w.mapaVersion = (w.mapaVersion || 0) + 1;
-    historia.length = 0;
-    corr.x = 0; corr.y = 0;
-    // el servidor frena tu intención al cambiar de sala: el cliente refleja lo mismo
+    // cambio de sala = teleport: sec nuevo y el próximo informe parte de aquí
+    sec = m.sec ?? 0;
+    repX = m.x; repY = m.y; repRot = m.rot ?? 0; repT = 0;
     input.dx = 0; input.dy = 0;
-    inputEnviado = { dx: 0, dy: 0 };
     mov.av = 0; mov.giro = 0;
-    movEnviado = { av: 0, giro: 0 };
     const g = w.map.grid;
     w.explored = new Uint8Array(g.w * g.h);
     w.light = new Float32Array(g.w * g.h);
@@ -450,54 +438,32 @@
     for (let i = 0; i < w.light.length; i++) if (w.light[i] > 0) w.explored[i] = 1;
   }
 
-  // ---------- movimiento libre (v22): input vectorial + predicción local ----------
-  let inputUltEnvio = 0;
+  // ---------- movimiento (v24): TODO local — solo se reporta la posición ----------
   function setInput(dx, dy) {
-    if (modoMov) { setMov(0, 0); modoMov = false; } // cambia de modo: frena la intención
+    modoMov = false;
     input.dx = Math.max(-1, Math.min(1, dx || 0));
     input.dy = Math.max(-1, Math.min(1, dy || 0));
-    // se envía solo al CAMBIAR; los cambios GRANDES (arrancar/parar/invertir)
-    // salen al instante y la deriva fina del giro se limita a ~11/s — girar
-    // andando cambia el vector CADA frame y saturaba al servidor (v23.4)
-    const cambio = Math.hypot(input.dx - inputEnviado.dx, input.dy - inputEnviado.dy);
-    const ahora = performance.now();
-    if (cambio > 0.6 || (cambio > 0.01 && ahora - inputUltEnvio > 90)) {
-      inputEnviado = { dx: input.dx, dy: input.dy };
-      inputUltEnvio = ahora;
-      enviar({ t: 'input', dx: input.dx, dy: input.dy });
-    }
   }
 
-  // v23.7 — 3ª persona: solo viaja la INTENCIÓN (avance ±1, giro ±1) y solo
-  // al cambiar (pulsar/soltar una tecla): el servidor integra la misma curva
+  // 3ª persona: intención local (avance ±1, giro ±1); frame() integra el rumbo
   function setMov(av, giro) {
     modoMov = true;
     mov.av = Math.sign(av || 0);
     mov.giro = Math.sign(giro || 0);
     input.dx = 0; input.dy = 0;
-    if (mov.av !== movEnviado.av || mov.giro !== movEnviado.giro) {
-      movEnviado = { av: mov.av, giro: mov.giro };
-      enviar({ t: 'mov', av: mov.av, giro: mov.giro });
-    }
   }
 
   function setRot(th) {
-    const w = Game.world;
-    w.player.rot = th;
-    const ahora = performance.now();
-    if (Math.abs(th - rotEnviada) > 0.03 && ahora - rotUltEnvio > 80) {
-      rotEnviada = th; rotUltEnvio = ahora;
-      enviar({ t: 'rot', th: Math.round(th * 100) / 100 });
-    }
+    Game.world.player.rot = th; // viaja con el próximo informe de posición
   }
 
-  // predicción: el cliente integra su propio movimiento con LA MISMA física
-  // que el servidor — la reconciliación casi nunca tiene que corregir
+  // física LOCAL (la compartida de sim/fisica.js) + informe {t:'p'} ~15/s.
+  // Lo que ves es donde estás: sin reconciliación, sin saltos. El servidor
+  // valida cada informe (velocidad/paredes/teleport) y solo responde 'mueve'
+  // si es imposible — p. ej. un cliente trucado.
   function frame(dt) {
     const w = Game.world;
     if (!listo) return;
-    // 3ª persona: el rumbo se integra AQUÍ con las mismas constantes que el
-    // servidor — cliente y servidor trazan la misma curva al girar
     let idx = input.dx, idy = input.dy;
     if (modoMov) {
       if (mov.giro) {
@@ -510,65 +476,20 @@
       const [nx, ny] = Fisica.mover(w.map.grid, w.player.x, w.player.y, idx, idy, dt, Fisica.VEL_JUGADOR);
       w.player.x = nx; w.player.y = ny;
     }
-    // corrección pendiente de la reconciliación, repartida por frames
-    // (exponencial, más rápida cuanto mayor el error): nunca un salto seco
-    if (corr.x || corr.y) {
-      const mag = Math.abs(corr.x) + Math.abs(corr.y);
-      const k = Math.min(1, dt * (6 + Math.min(12, mag * 8)));
-      const cx = corr.x * k, cy = corr.y * k;
-      if (!Fisica.choca(w.map.grid, w.player.x + cx, w.player.y + cy)) {
-        w.player.x += cx; w.player.y += cy;
-      }
-      corr.x -= cx; corr.y -= cy;
-      if (Math.abs(corr.x) + Math.abs(corr.y) < 0.004) corr.x = corr.y = 0;
-    }
     const tx = Fisica.tileDe(w.player.x), ty = Fisica.tileDe(w.player.y);
     if (!tileFov || tileFov[0] !== tx || tileFov[1] !== ty) {
       tileFov = [tx, ty];
       fov(w);
     }
-    // historial para la reconciliación (también parado: el tiempo sigue)
+    // informe de posición: al moverte/girar (mín. 60 ms entre informes) — los
+    // tramos cortos mantienen legal el chequeo de paredes del servidor
     const ahora = performance.now();
-    historia.push({ t: ahora, x: w.player.x, y: w.player.y });
-    while (historia.length && historia[0].t < ahora - 1200) historia.shift();
-  }
-
-  // Posición autoritativa propia (v23.1): el servidor REPITE tu trayectoria
-  // con retraso (tu input tarda ~rtt/2 en llegarle y su foto otro ~rtt/2 en
-  // volver, más el tick de 100 ms) — su posición corresponde a ALGÚN punto de
-  // tu rastro reciente, y el jitter de la red impide clavar cuál por reloj
-  // (intentarlo producía tirones a 10 Hz con ping real). Por eso se compara
-  // contra TODO el rastro: si el servidor confirma cualquier punto del camino,
-  // no hay nada que corregir; parado, ambos convergen al mismo sitio. Solo una
-  // desviación respecto a todo el rastro es desincronización real — y el
-  // error se mide desde el punto MÁS CERCANO y se aplica como desplazamiento
-  // (nunca tirando hacia una posición vieja).
-  function reconciliar(w, sx, sy) {
-    let d = Fisica.dist(w.player.x, w.player.y, sx, sy);
-    let refX = w.player.x, refY = w.player.y;
-    // umbral: en movimiento se tolera el jitter del camino; parado, cliente y
-    // servidor deben CONVERGER al mismo sitio (umbral fino)
-    const enMarcha = modoMov ? (mov.av || mov.giro) : (input.dx || input.dy);
-    const umbral = enMarcha ? 0.4 : 0.15;
-    for (let i = historia.length - 1; i >= 0; i--) {
-      const h = historia[i];
-      const dh = Fisica.dist(h.x, h.y, sx, sy);
-      if (dh < d) { d = dh; refX = h.x; refY = h.y; }
-      if (d < umbral) { corr.x = 0; corr.y = 0; return; } // va por nuestro rastro
+    const dMov = Math.abs(w.player.x - repX) + Math.abs(w.player.y - repY);
+    const dRot = Math.abs(Fisica.normAng((w.player.rot || 0) - repRot));
+    if ((dMov > 0.03 || dRot > 0.05) && ahora - repT > 60 && !w.escondido) {
+      repX = w.player.x; repY = w.player.y; repRot = w.player.rot || 0; repT = ahora;
+      enviar({ t: 'p', x: r2(repX), y: r2(repY), rot: r2(repRot), sec });
     }
-    if (d > 1.5) {
-      // desincronización real (teleport perdido, empujón, pared): corte limpio
-      w.player.x = sx; w.player.y = sy;
-      historia.length = 0;
-      corr.x = 0; corr.y = 0;
-      fov(w);
-      return;
-    }
-    // deriva real: el error (servidor − punto más cercano del rastro) queda
-    // PENDIENTE y frame() lo aplica suave — nada de saltos a 10 Hz
-    corr.x = sx - refX;
-    corr.y = sy - refY;
-    if (window.NETDEBUG) console.log(`[net] deriva ${d.toFixed(2)} tiles · rtt ${rtt | 0} ms`);
   }
 
   // ---------- acciones ----------
@@ -609,8 +530,8 @@
 
   // frena cualquier movimiento en curso (chat, blur, modales)
   function parar() {
-    if (modoMov) setMov(0, 0);
-    else setInput(0, 0);
+    if (modoMov) { mov.av = 0; mov.giro = 0; }
+    else { input.dx = 0; input.dy = 0; }
   }
 
   function abrirChat() {

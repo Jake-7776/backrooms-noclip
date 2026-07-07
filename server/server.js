@@ -112,9 +112,7 @@ wss.on('connection', (ws, req) => {
       return;
     }
     if (!jug) return; // todo lo demás exige estar dentro
-    if (m.t === 'input') sala.input(jug, m.dx, m.dy);
-    else if (m.t === 'mov') sala.mov(jug, m.av, m.giro);
-    else if (m.t === 'rot') sala.girar(jug, m.th);
+    if (m.t === 'p') sala.posicion(jug, m);
     else if (m.t === 'accion') sala.accion(jug);
     else if (m.t === 'cruzar') sala.cruzar(jug, m.si);
     else if (m.t === 'usar') sala.usar(jug, m.mano);
@@ -192,15 +190,16 @@ function cambiarDeSala(jug, salaVieja, defSalida, opts) {
   }
   jug.x = x; jug.y = y;
   jug.canal = null; jug.escondido = null;
-  jug.input = { dx: 0, dy: 0 }; // que la tarjeta del nivel no te vea andando solo
-  jug.mov = null;
-  jug._integradoHasta = null;
+  // teleport de sala: caducan los informes de posición en vuelo (v24)
+  jug.sec = (jug.sec || 0) + 1;
+  jug._posT = Date.now();
+  jug._margen = 0.8;
   nueva.prepararCaminata(jug);
   const id = jug.id;
   nueva.jugadores.set(id, jug);
   nueva.enviar(jug.ws, {
     t: 'nivel', nivel: nueva.nivelId, inst: nueva.inst, semilla: nueva.semilla,
-    x, y, rot: jug.rot, via: defSalida.texto,
+    x, y, rot: jug.rot, sec: jug.sec, via: defSalida.texto,
     sinTarjeta: !!(opts && opts.sinTarjeta),
     salud: jug.salud, inv: jug.inv, manos: jug.manos,
     retorno: jug.retorno,
@@ -285,8 +284,10 @@ function comando(jug, sala, linea) {
   }
 }
 
-// simulación: 10 Hz para todas las salas con gente dentro
-setInterval(() => tickTodas(Date.now()), 100);
+// simulación: 20 Hz para todas las salas con gente dentro (v23.8 — a 10 Hz
+// las cuantizaciones del tick se notaban en las maniobras; el coste medido
+// con 500 bots a 10 Hz era 7.45 ms/tick: hay margen de sobra)
+setInterval(() => tickTodas(Date.now()), 50);
 
 // latido: conexiones muertas fuera cada 30 s
 setInterval(() => {

@@ -21,6 +21,20 @@ function cardinalDe(th) {
 }
 const r2 = (v) => Math.round(v * 100) / 100;
 
+// ¿Se puede ir de A a B sin cruzar nada sólido? Muestreo cada ~0.2 tiles con
+// radio tolerante (0.22 vs 0.35 del cuerpo): los puntos reportados ya pasaron
+// la colisión del cliente — esto solo caza atajos IMPOSIBLES (paredes).
+// El paso de 0.2 garantiza una muestra dentro de cualquier muro de 1 tile.
+function caminoLegal(grid, x0, y0, x1, y1) {
+  const d = Math.hypot(x1 - x0, y1 - y0);
+  const n = Math.max(1, Math.ceil(d / 0.2));
+  for (let i = 1; i <= n; i++) {
+    const f = i / n;
+    if (Fisica.choca(grid, x0 + (x1 - x0) * f, y0 + (y1 - y0) * f, 0.22)) return false;
+  }
+  return true;
+}
+
 class Sala {
   constructor(nivelId, inst) {
     this.nivelId = nivelId;
@@ -84,18 +98,21 @@ class Sala {
     const [x, y] = this.buscarSpawn();
     const jug = {
       id, ws, nombre, token, x, y, rot: Math.PI, // θ continuo (π = mirando al sur)
-      input: { dx: 0, dy: 0 }, distSala: 0,
+      distSala: 0,
       salud: 100, luz: false, escondido: null, muerto: false,
       inv: [], manos: [null, null], equipo: { cara: null, cuerpo: null, pies: null },
       esAdmin: false, muteadoHasta: 0,
       ultMov: 0, ultChat: 0, canal: null, ofertaEn: null,
       retorno: null, // puerta personal de vuelta (v23; la pone cambiarDeSala)
-      mov: null,     // intención av/giro (v23.7; excluyente con input vectorial)
+      // v24 — autoridad del cliente con validación:
+      sec: 0,            // nº de teleport: descarta informes en vuelo tras un salto
+      _posT: Date.now(), // hora del último informe (presupuesto de velocidad)
+      _margen: 0.8,      // cubeta de distancia disponible (anti-speedhack)
     };
     this.prepararCaminata(jug);
     this.enviar(ws, {
       t: 'bienvenida', id, nivel: this.nivelId, inst: this.inst,
-      semilla: this.semilla, x, y, rot: jug.rot,
+      semilla: this.semilla, x, y, rot: jug.rot, sec: 0,
       salud: jug.salud, inv: jug.inv, manos: jug.manos,
       caminata: jug.caminataObjetivo ? { pasos: 0, objetivo: jug.caminataObjetivo } : null,
       jugadores: this.censo(), ...this.estadoDinamico(),
@@ -128,72 +145,36 @@ class Sala {
     this.difundir({ t: 'sale', id: jug.id });
   }
 
-  // Integra el tramo parcial del tick con la intención VIEJA antes de
-  // cambiarla (v23.2). Sin esto, arrancar/frenar/girar queda cuantizado al
-  // tick de 100 ms y la reconciliación lo interpreta como deriva (temblores).
-  // OJO (fix v23.4): el tramo arranca en la ÚLTIMA integración de ESTE
-  // jugador, no en el inicio del tick — con varios mensajes por tick se
-  // re-integraba el mismo tramo (velocidad ×3 y saltos hacia delante).
-  // Invariante: la suma de dt integrados NUNCA supera el tiempo real.
-  integrarParcial(jug) {
+  // ---------- v24: el MOVIMIENTO es del cliente; el servidor VALIDA ----------
+  // Toda la saga v23.x demostró que simular el movimiento del jugador en el
+  // servidor pelea contra la latencia (cerca de esquinas el resultado es
+  // CAÓTICO: 60 ms deciden de qué lado de un pilar sales). En un cooperativo
+  // la autoridad correcta es el cliente — integra su física (sim/fisica.js) y
+  // reporta su posición; aquí solo se comprueba que sea FÍSICAMENTE posible:
+  //  · cubeta de velocidad (anti-speedhack: Σdist ≤ vel·Σt, con margen)
+  //  · caminoLegal (anti-noclip: nada de cruzar paredes entre informes)
+  //  · sec (nº de teleport): descarta informes en vuelo tras un salto
+  // Un informe ilegal NO mueve nada: se responde con la última posición
+  // válida ('mueve' + sec) y el cliente vuelve a ella.
+  posicion(jug, m) {
+    if (jug.muerto || jug.escondido) return;
+    if ((m.sec | 0) < (jug.sec || 0)) return; // anterior a un teleport: obsoleto
     const ahora = Date.now();
-    const desde = Math.max(this._ultTick || ahora, jug._integradoHasta || 0);
-    const dtParcial = (ahora - desde) / 1000;
-    const enMarcha = (jug.mov && (jug.mov.av || jug.mov.giro)) ||
-      (jug.input && (jug.input.dx || jug.input.dy));
-    if (dtParcial > 0.004 && enMarcha && !jug.escondido) {
-      this.integrar(jug, Math.min(0.25, dtParcial), this._movidosExtra || (this._movidosExtra = []));
-      jug._integradoHasta = ahora;
-    }
-  }
-
-  // ---------- movimiento libre (v22): el cliente manda un VECTOR de deseo ----------
-  input(jug, dx, dy) {
-    if (jug.muerto) return;
-    this.integrarParcial(jug);
-    jug.input = { dx, dy };
-    jug.mov = null;
-  }
-
-  // v23.7 — 3ª persona: INTENCIÓN de movimiento (avance ±1, giro ±1). El
-  // servidor integra el rumbo con la MISMA velocidad angular que el cliente:
-  // ambos trazan la misma curva y el giro deja de generar deriva/saltos
-  // (antes llegaban ~11 fotos/s del vector y aquí se integraba un polígono
-  // de cuerdas que se separaba de la curva real en cada giro).
-  mov(jug, av, giro) {
-    if (jug.muerto) return;
-    this.integrarParcial(jug);
-    jug.mov = { av, giro };
-    jug.input = { dx: 0, dy: 0 };
-  }
-
-  // integración de un jugador en el tick: rumbo + física + consecuencias
-  integrar(jug, dt, movidos) {
-    if (jug.muerto || dt <= 0) return;
-    let giró = false;
-    if (jug.mov && jug.mov.giro) {
-      // rumbo integrado en el servidor: la MISMA curva que predice el cliente
-      jug.rot = Fisica.normAng((jug.rot ?? Math.PI) + jug.mov.giro * Fisica.GIRO_JUGADOR * dt);
-      giró = true;
-    }
-    let inp = jug.input;
-    if (jug.mov) {
-      inp = jug.mov.av
-        ? { dx: Math.sin(jug.rot) * jug.mov.av, dy: -Math.cos(jug.rot) * jug.mov.av }
-        : null;
-    }
-    if (!inp || (!inp.dx && !inp.dy)) {
-      if (giró) movidos.push(jug); // girar sin andar también se difunde (facing)
+    const dt = Math.min(1.5, (ahora - (jug._posT ?? ahora)) / 1000);
+    jug._posT = ahora;
+    jug._margen = Math.min(1.3, (jug._margen ?? 0.8) + dt * Fisica.VEL_JUGADOR * 1.12);
+    const d = Fisica.dist(jug.x, jug.y, m.x, m.y);
+    if (d > jug._margen || !caminoLegal(this.map.grid, jug.x, jug.y, m.x, m.y)) {
+      jug.sec = (jug.sec || 0) + 1;
+      this.enviar(jug.ws, { t: 'mueve', id: jug.id, x: r2(jug.x), y: r2(jug.y), sec: jug.sec });
       return;
     }
-    if (jug.escondido) this.esconder(jug, false); // moverse te saca del mueble
-    const [nx, ny] = Fisica.mover(this.map.grid, jug.x, jug.y, inp.dx, inp.dy, dt, Fisica.VEL_JUGADOR);
-    const d = Fisica.dist(jug.x, jug.y, nx, ny);
-    if (d < 0.0005) { if (giró) movidos.push(jug); return; }
-    jug.x = nx; jug.y = ny;
-    movidos.push(jug);
+    jug._margen -= d;
+    jug.x = m.x; jug.y = m.y;
+    if (m.rot !== undefined) jug.rot = m.rot;
+    (this._movidosExtra || (this._movidosExtra = [])).push(jug);
     // canal de romper: alejarse del punto de inicio lo interrumpe
-    if (jug.canal && Fisica.dist(nx, ny, jug.canal.origen[0], jug.canal.origen[1]) > 0.3)
+    if (jug.canal && Fisica.dist(m.x, m.y, jug.canal.origen[0], jug.canal.origen[1]) > 0.3)
       this.cancelarCanal(jug, 'Te apartas: dejas lo que estabas haciendo.');
     this.proximidad(jug);
     this.caminataAvanza(jug, d);
@@ -347,8 +328,8 @@ class Sala {
       jug.escondido = { x: prop.x, y: prop.y };
       // el cuerpo se queda EN el mueble: al salir, sales de ahí
       jug.x = prop.x; jug.y = prop.y;
-      jug.input = { dx: 0, dy: 0 };
-      this.difundir({ t: 'mueve', id: jug.id, x: r2(jug.x), y: r2(jug.y) });
+      jug.sec = (jug.sec || 0) + 1; // teleport: los informes en vuelo caducan
+      this.difundir({ t: 'mueve', id: jug.id, x: r2(jug.x), y: r2(jug.y), sec: jug.sec });
       this.enviar(jug.ws, { t: 'aviso', txt: 'Te metes dentro. Nada debería verte… si nadie te vio entrar.' });
     } else {
       jug.escondido = null;
@@ -643,22 +624,16 @@ class Sala {
     return false;
   }
 
-  // ---------- tick de simulación (lo llama server.js a 10 Hz) ----------
+  // ---------- tick de simulación (lo llama server.js a 20 Hz) ----------
   tick(ahora) {
     if (!this.jugadores.size) return;
     const dt = Math.min(0.25, (ahora - (this._ultTick || ahora)) / 1000);
     this._ultTick = ahora;
-    // arrastra los tramos parciales ya integrados en input() (v23.2)
+    // las posiciones aceptadas en posicion() esperan aquí su difusión
     const movidos = this._movidosExtra || [];
     this._movidosExtra = [];
-    for (const jug of this.jugadores.values()) {
-      // si input() ya integró parte del tick, aquí solo queda el resto
-      const dtJ = jug._integradoHasta
-        ? Math.min(dt, Math.max(0, (ahora - jug._integradoHasta) / 1000)) : dt;
-      jug._integradoHasta = null;
-      this.integrar(jug, dtJ, movidos);
+    for (const jug of this.jugadores.values())
       if (jug.canal && ahora >= jug.canal.hasta) this.resolverCanal(jug);
-    }
     Entidades.tick(this, ahora, dt);
     // difusión BATCHED de posiciones: un solo mensaje por tick con lo que se
     // movió (dedupe: un jugador puede venir del tramo parcial Y del tick)
@@ -705,12 +680,6 @@ class Sala {
       if (j.id !== jug.id && Math.hypot(j.x - jug.x, j.y - jug.y) > P.RADIO_CHAT) continue;
       j.ws.send(raw);
     }
-  }
-
-  girar(jug, th) {
-    if (jug.rot === th) return;
-    jug.rot = th;
-    this.difundir({ t: 'gira', id: jug.id, rot: r2(th) }, jug.id);
   }
 
   enviar(ws, msg) {

@@ -56,7 +56,7 @@ class Cliente {
     return new Promise((res, rej) => {
       this.ws = new WebSocket(`ws://127.0.0.1:${PUERTO}/ws`);
       this.ws.on('open', () => {
-        this.enviar({ t: 'hola', nombre: this.nombre, token: 'arnes-' + this.nombre, v: 5, nivel: this.nivelPedido });
+        this.enviar({ t: 'hola', nombre: this.nombre, token: 'arnes-' + this.nombre, v: 6, nivel: this.nivelPedido });
         res();
       });
       this.ws.on('message', (raw) => {
@@ -65,16 +65,22 @@ class Cliente {
           this.id = m.id ?? this.id;
           this.nivel = m.nivel;
           this.x = m.x; this.y = m.y;
+          this.sec = m.sec ?? 0;
           this.map = generarMapa(m.nivel, m.semilla).map;
           for (const i of m.abiertas || []) if (this.map.exits[i]) this.map.exits[i].def._abierta = true;
         }
         if (m.t === 'pos') {
+          // el ECO del servidor: posiciones ACEPTADAS (mide el validador)
           for (const [id, x, y] of m.j || []) if (id === this.id) {
-            this.recorrido = (this.recorrido || 0) + Math.hypot(x - this.x, y - this.y);
-            this.x = x; this.y = y;
+            if (this.ecoX !== undefined)
+              this.aceptado = (this.aceptado || 0) + Math.hypot(x - this.ecoX, y - this.ecoY);
+            this.ecoX = x; this.ecoY = y;
           }
         }
-        if (m.t === 'mueve' && m.id === this.id) { this.x = m.x; this.y = m.y; }
+        if (m.t === 'mueve' && m.id === this.id) {
+          this.x = m.x; this.y = m.y;
+          if (m.sec !== undefined) { this.sec = m.sec; this.rechazos = (this.rechazos || 0) + 1; }
+        }
         this.buzon.push({ m, t: Date.now() });
       });
       this.ws.on('error', rej);
@@ -93,23 +99,19 @@ class Cliente {
       mira();
     });
   }
-  // navega con el input vectorial hasta quedar a ≤radio del tile (tx,ty)
+  // v24: navega INTEGRANDO la física local y reportando posiciones {t:'p'}
+  // (exactamente lo que hace el cliente real)
   irA(tx, ty, radio = 0.55) {
     return new Promise((res, rej) => {
       const g = this.map.grid;
       const dist = MapGen.bfsDist(g, tx, ty);
       const t0 = Date.now();
-      let ultimo = null;
+      let tAnt = Date.now();
       const paso = setInterval(() => {
         const d = Fisica.dist(this.x, this.y, tx, ty);
-        if (d <= radio) {
-          clearInterval(paso);
-          this.enviar({ t: 'input', dx: 0, dy: 0 });
-          return res();
-        }
+        if (d <= radio) { clearInterval(paso); return res(); }
         if (Date.now() - t0 > 60000) {
           clearInterval(paso);
-          this.enviar({ t: 'input', dx: 0, dy: 0 });
           return rej(new Error(`atascado navegando a ${tx},${ty} (estoy en ${this.x.toFixed(1)},${this.y.toFixed(1)})`));
         }
         const cx = Fisica.tileDe(this.x), cy = Fisica.tileDe(this.y);
@@ -123,14 +125,16 @@ class Cliente {
             if (v >= 0 && v < aqui) { destino = [nx, ny]; break; }
           }
         }
+        const ahora = Date.now();
+        const dt = Math.min(0.2, (ahora - tAnt) / 1000);
+        tAnt = ahora;
         const vx = destino[0] - this.x, vy = destino[1] - this.y;
-        const m = Math.hypot(vx, vy) || 1;
-        const clave = `${Math.round(vx / m * 20)},${Math.round(vy / m * 20)}`;
-        if (clave !== ultimo) { // solo al cambiar (como el cliente real)
-          ultimo = clave;
-          this.enviar({ t: 'input', dx: vx / m, dy: vy / m });
-        }
-      }, 90);
+        [this.x, this.y] = Fisica.mover(g, this.x, this.y, vx, vy, dt, Fisica.VEL_JUGADOR);
+        this.enviar({
+          t: 'p', x: Math.round(this.x * 100) / 100, y: Math.round(this.y * 100) / 100,
+          rot: Math.round(Math.atan2(vx, -vy) * 100) / 100, sec: this.sec || 0,
+        });
+      }, 70);
     });
   }
 }
@@ -175,40 +179,36 @@ const espera = (ms) => new Promise((r) => setTimeout(r, ms));
     ok(!luzDe, 'sin linterna en mano NO se difunde luzDe');
     ok(!!avisoLuz, 'sin linterna en mano llega el aviso explicativo');
 
-    // --- invariante de velocidad (fix v23.4): girar andando manda ~60
-    // inputs/s y cada uno integraba el tramo del tick OTRA VEZ → ×3 de
-    // velocidad en el servidor. El camino recorrido no puede superar vel×t.
+    // --- v24, el VALIDADOR: (a) informes más rápidos que la física legal se
+    // rechazan (anti-speedhack) — lo aceptado nunca supera vel×t ---
     {
-      c.recorrido = 0;
+      c.aceptado = 0; c.rechazos = 0;
+      c.ecoX = undefined; c.ecoY = undefined;
       const t0 = Date.now();
-      for (let i = 0; i < 72; i++) { // 72 mensajes en ~1.2 s, vector girando
-        const th = i * 0.05;
-        c.enviar({ t: 'input', dx: Math.sin(th), dy: -Math.cos(th) });
-        await espera(16);
+      let fx = c.x, fy = c.y;
+      const g = c.map.grid;
+      for (let i = 0; i < 30; i++) { // intenta avanzar a ~10 tiles/s (>2× legal)
+        const th = i * 0.15;
+        [fx, fy] = Fisica.mover(g, fx, fy, Math.sin(th), -Math.cos(th), 0.04 * 2.3, 10);
+        c.enviar({ t: 'p', x: fx, y: fy, rot: 0, sec: c.sec || 0 });
+        await espera(40);
       }
-      c.enviar({ t: 'input', dx: 0, dy: 0 });
-      await espera(400); // a que lleguen las últimas posiciones del tick
-      const dur = (Date.now() - t0) / 1000;
-      const tope = 4.6 * dur * 1.15 + 0.3;
-      ok(c.recorrido <= tope,
-        `sin speedhack por spam de input (${c.recorrido.toFixed(1)} tiles en ${dur.toFixed(1)} s, tope ${tope.toFixed(1)})`);
-    }
-
-    // --- v23.7: la INTENCIÓN av+giro traza una curva a velocidad legal y el
-    // lote de posiciones trae el rumbo que integra el servidor ---
-    {
-      c.recorrido = 0;
-      const t0 = Date.now();
-      c.enviar({ t: 'mov', av: 1, giro: 1 }); // andar girando = círculo
-      await espera(2000);
-      c.enviar({ t: 'mov', av: 0, giro: 0 });
       await espera(400);
       const dur = (Date.now() - t0) / 1000;
-      ok(c.recorrido > 1 && c.recorrido <= 4.6 * dur * 1.15 + 0.3,
-        `mov av+giro traza una curva legal (${c.recorrido.toFixed(1)} tiles en ${dur.toFixed(1)} s)`);
-      const conRot = c.buzon.slice(-60).find((e) =>
-        e.m.t === 'pos' && (e.m.j || []).some((j) => j[0] === c.id && j.length >= 4));
-      ok(!!conRot, 'el lote pos incluye el rumbo integrado por el servidor');
+      const tope = 4.6 * dur * 1.2 + 1.4; // margen de cubeta inicial incluido
+      ok((c.aceptado || 0) <= tope,
+        `speedhack rechazado: acepta ${(c.aceptado || 0).toFixed(1)} tiles en ${dur.toFixed(1)} s (tope ${tope.toFixed(1)}, ${c.rechazos} rechazos)`);
+      c.x = c.ecoX ?? c.x; c.y = c.ecoY ?? c.y; // re-sincroniza con lo aceptado
+    }
+
+    // --- v24, el VALIDADOR: (b) un salto imposible (2.5 tiles de golpe) se
+    // rechaza y el servidor devuelve la última posición válida con sec ---
+    {
+      const n0r = c.rechazos || 0;
+      const nb = c.buzon.length;
+      c.enviar({ t: 'p', x: c.x + 2.5, y: c.y, rot: 0, sec: c.sec || 0 });
+      await c.espera((m) => m.t === 'mueve' && m.id === c.id, 3000, nb).catch(() => {});
+      ok((c.rechazos || 0) > n0r, 'teleport de 2.5 tiles → rechazado con corrección y sec nuevo');
     }
 
     // --- registrar un contenedor con ESPACIO ---
@@ -231,6 +231,15 @@ const espera = (ms) => new Promise((r) => setTimeout(r, ms));
       c.enviar({ t: 'accion' });
       await espera(400);
       ok(!c.buzon.slice(n0).some((e) => e.m.t === 'registrado'), 'registrar no se repite en el mismo mueble');
+      // ojo: si el mueble era un ESCONDITE (taquilla/nevera/archivador), ese
+      // segundo ESPACIO te mete dentro — y escondido, el servidor ignora los
+      // informes de posición. Salir antes de seguir navegando.
+      if (c.buzon.slice(n0).some((e) => e.m.t === 'esconde' && e.m.id === c.id && e.m.si)) {
+        c.enviar({ t: 'accion' });
+        await espera(300);
+        ok(c.buzon.some((e) => e.m.t === 'esconde' && e.m.id === c.id && e.m.si === false),
+          'ESPACIO dentro del mueble te saca (escondite funcional)');
+      }
     }
 
     // --- cruzar una salida y comprobar la puerta de RETORNO ---
@@ -263,10 +272,17 @@ const espera = (ms) => new Promise((r) => setTimeout(r, ms));
       // --- volver por ella ---
       const objetivo = puertaVuelta || niv.retorno;
       if (objetivo) {
-        // alejarse primero (histéresis) y volver a la puerta
+        // alejarse primero (histéresis: >1 tile de TODA salida) y volver
         await espera(300);
-        const lejos = { x: Fisica.tileDe(niv.x) + 3, y: Fisica.tileDe(niv.y) };
-        try { await c.irA(lejos.x, lejos.y, 1.2); } catch (e) { /* puede chocar: da igual */ }
+        const g2 = c.map.grid;
+        const dist2 = MapGen.bfsDist(g2, Fisica.tileDe(c.x), Fisica.tileDe(c.y));
+        let lejos = null;
+        for (let i = 0; i < dist2.length && !lejos; i++) {
+          if (dist2[i] < 3 || dist2[i] > 14) continue;
+          const lx = i % g2.w, ly = (i / g2.w) | 0;
+          if (c.map.exits.every((e) => Math.hypot(e.x - lx, e.y - ly) > 1.8)) lejos = [lx, ly];
+        }
+        if (lejos) { try { await c.irA(lejos[0], lejos[1], 0.6); } catch (e) {} }
         await c.irA(objetivo.x, objetivo.y, 0.5);
         const oferta2 = await c.espera((m) => m.t === 'oferta', 5000, c.buzon.length - 4);
         n0 = c.buzon.length;

@@ -19,7 +19,7 @@
 //   {t:'pong'}
 'use strict';
 
-const VERSION = 5; // v23.7: giro por INTENCIÓN ({t:'mov'}) — servidor y cliente trazan la misma curva
+const VERSION = 6; // v24: el movimiento es del CLIENTE y el servidor VALIDA ({t:'p'})
 const MAX_MSG = 512;          // bytes por mensaje entrante
 const MAX_CHAT = 120;         // caracteres de un chat
 const COOLDOWN_MOVER = 165;   // ms entre pasos (el cliente usa 170: margen de jitter)
@@ -41,20 +41,11 @@ function leer(raw) {
       if (m.token.length > 64) return null;
       if (m.nivel !== undefined && (typeof m.nivel !== 'string' || m.nivel.length > 32)) return null;
       return m;
-    case 'input': { // v22: ESTADO de movimiento (vector deseado; la velocidad la pone el servidor)
-      const dx = +m.dx, dy = +m.dy;
-      if (!isFinite(dx) || !isFinite(dy)) return null;
-      return { t: 'input', dx: Math.max(-1, Math.min(1, dx)), dy: Math.max(-1, Math.min(1, dy)) };
-    }
-    case 'rot': { // v22: ángulo continuo en radianes (θ=0 norte, θ=π/2 este)
-      const th = +m.th;
-      if (!isFinite(th)) return null;
-      return { t: 'rot', th };
-    }
-    case 'mov': { // v23.7 (3ª persona): INTENCIÓN — avance ±1 y giro ±1; el
-      // servidor integra rumbo y curva con las MISMAS constantes que el cliente
-      const av = Math.sign(+m.av || 0), giro = Math.sign(+m.giro || 0);
-      return { t: 'mov', av, giro };
+    case 'p': { // v24: POSICIÓN reportada por el cliente (él es la autoridad
+      // del movimiento; el servidor la VALIDA — velocidad, paredes, teleports)
+      const x = +m.x, y = +m.y, rot = +m.rot;
+      if (!isFinite(x) || !isFinite(y)) return null;
+      return { t: 'p', x, y, rot: isFinite(rot) ? rot : 0, sec: m.sec | 0 };
     }
     case 'chat':
       if (typeof m.txt !== 'string') return null;
