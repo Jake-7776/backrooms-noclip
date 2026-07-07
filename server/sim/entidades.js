@@ -6,10 +6,18 @@
 'use strict';
 
 const { MapGen, FOV } = require('./mundo');
+const Fisica = require('../../game/js/sim/fisica');
 
-const PERIODO_PASO = 260;   // ms por paso con velocidad 1 (el jugador va a 170)
-const TELEGRAPH_MS = 600;   // aviso ⚠ antes del golpe: moverse lo esquiva
-const RASTRO_MS = 2600;     // tiempo sin detectar a nadie antes de abandonar la caza
+const PERIODO_CEREBRO = 260; // ms entre decisiones (elegir waypoint, atacar)
+const TELEGRAPH_MS = 600;    // aviso ⚠ antes del golpe: alejarse >1.1 lo esquiva
+const RASTRO_MS = 2600;      // tiempo sin detectar a nadie antes de abandonar la caza
+const RADIO_ENT = 0.3;       // cuerpo físico de las entidades
+
+// velocidad continua (tiles/s): el jugador va a 4.6 — que se sienta la diferencia
+function velDe(e) {
+  if (e.def.comportamiento === 'cazador') return 5.0; // implacable: te alcanza
+  return (e.def.velocidad || 1) >= 2 ? 4.8 : 3.4;
+}
 
 function crear(map, defs, rng) {
   return (map.entitySpawns || []).map((s, i) => {
@@ -28,6 +36,7 @@ function crear(map, defs, rng) {
       sinVerteDesde: 0,
       proximoPaso: 0,
       pasoExtra: 0,
+      wp: null, // tile-waypoint hacia el que avanza el cuerpo (v22)
     };
   });
 }
@@ -38,11 +47,15 @@ function transitable(sala, x, y) {
   return MapGen.walkable(g.t[y * g.w + x]);
 }
 
+// ¿el TILE destino está reclamado? (waypoint/cuerpo de otra entidad o jugador)
 function ocupada(sala, x, y, self) {
-  for (const e of sala.entidades) if (e !== self && e.viva && e.x === x && e.y === y) return true;
-  // los jugadores también bloquean a las entidades: si no, con la sala llena se
-  // suben encima (distancia 0 ≠ adyacente) y se quedan clavadas sin atacar
-  for (const j of sala.jugadores.values()) if (!j.escondido && j.x === x && j.y === y) return true;
+  for (const e of sala.entidades) {
+    if (e === self || !e.viva) continue;
+    if (Fisica.tileDe(e.x) === x && Fisica.tileDe(e.y) === y) return true;
+    if (e.wp && e.wp[0] === x && e.wp[1] === y) return true;
+  }
+  for (const j of sala.jugadores.values())
+    if (!j.escondido && Fisica.tileDe(j.x) === x && Fisica.tileDe(j.y) === y) return true;
   return false;
 }
 
@@ -53,9 +66,9 @@ function dmapJugadores(sala) {
   const d = new Int32Array(g.w * g.h).fill(-1);
   const cola = [];
   for (const j of sala.jugadores.values()) {
-    if (j.escondido) continue;
-    const i = j.y * g.w + j.x;
-    if (d[i] !== 0) { d[i] = 0; cola.push(i); }
+    if (j.escondido || j.muerto) continue;
+    const i = Fisica.tileDe(j.y) * g.w + Fisica.tileDe(j.x);
+    if (i >= 0 && i < d.length && d[i] !== 0) { d[i] = 0; cola.push(i); }
   }
   for (let q = 0; q < cola.length; q++) {
     const i = cola[q], x = i % g.w, y = (i / g.w) | 0, v = d[i] + 1;
@@ -71,51 +84,55 @@ function dmapJugadores(sala) {
   return d;
 }
 
+// El CEREBRO elige tiles-waypoint (misma táctica de siempre); el cuerpo se
+// mueve en continuo hacia ellos en cada tick (integrarCuerpos).
+function fijarWp(e, x, y) { e.wp = [x, y]; }
+
+function tileEnt(e) { return [Fisica.tileDe(e.x), Fisica.tileDe(e.y)]; }
+
 function pasoHaciaJugadores(sala, e) {
   const g = sala.map.grid, dm = sala._dmap;
-  let mejor = null, mejorV = dm[e.y * g.w + e.x];
+  const [ex, ey] = tileEnt(e);
+  let mejor = null, mejorV = dm[ey * g.w + ex];
   if (mejorV < 0) mejorV = Infinity;
   for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-    const nx = e.x + dx, ny = e.y + dy;
+    const nx = ex + dx, ny = ey + dy;
     if (!transitable(sala, nx, ny) || ocupada(sala, nx, ny, e)) continue;
     const v = dm[ny * g.w + nx];
     if (v >= 0 && v < mejorV) { mejorV = v; mejor = [nx, ny]; }
   }
-  if (mejor) { moverA(sala, e, mejor[0], mejor[1]); return true; }
+  if (mejor) { fijarWp(e, mejor[0], mejor[1]); return true; }
   return false;
 }
 
 function pasoAleatorio(sala, e) {
+  const [ex, ey] = tileEnt(e);
   const dirs = sala.rng.shuffle([[1, 0], [-1, 0], [0, 1], [0, -1]]);
   for (const [dx, dy] of dirs) {
-    const nx = e.x + dx, ny = e.y + dy;
+    const nx = ex + dx, ny = ey + dy;
     if (transitable(sala, nx, ny) && !ocupada(sala, nx, ny, e)) {
-      moverA(sala, e, nx, ny);
+      fijarWp(e, nx, ny);
       return;
     }
   }
 }
 
 function pasoHacia(sala, e, tx, ty) {
-  const dx = Math.sign(tx - e.x), dy = Math.sign(ty - e.y);
-  const opciones = Math.abs(tx - e.x) > Math.abs(ty - e.y)
+  const [ex, ey] = tileEnt(e);
+  const dx = Math.sign(tx - ex), dy = Math.sign(ty - ey);
+  const opciones = Math.abs(tx - ex) > Math.abs(ty - ey)
     ? [[dx, 0], [0, dy]] : [[0, dy], [dx, 0]];
   for (const [mx, my] of opciones) {
     if (!mx && !my) continue;
-    if (transitable(sala, e.x + mx, e.y + my) && !ocupada(sala, e.x + mx, e.y + my, e)) {
-      moverA(sala, e, e.x + mx, e.y + my);
+    if (transitable(sala, ex + mx, ey + my) && !ocupada(sala, ex + mx, ey + my, e)) {
+      fijarWp(e, ex + mx, ey + my);
       return;
     }
   }
 }
 
-function moverA(sala, e, x, y) {
-  e.x = x; e.y = y;
-  sala.difundir({ t: 'entMueve', uid: e.uid, x, y });
-}
-
 function adyacente(e, j) {
-  return Math.abs(e.x - j.x) + Math.abs(e.y - j.y) === 1;
+  return Fisica.dist(e.x, e.y, j.x, j.y) <= 0.95;
 }
 
 function jugadorAdyacente(sala, e) {
@@ -218,19 +235,20 @@ function pasoEntidad(sala, e, ahora) {
   if (e.huyendoHasta && ahora < e.huyendoHasta) {
     e.preparando = false;
     const g = sala.map.grid, dm = sala._dmap;
-    let mejor = null, mejorV = dm[e.y * g.w + e.x];
+    const [ex, ey] = tileEnt(e);
+    let mejor = null, mejorV = dm[ey * g.w + ex];
     for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      const nx = e.x + dx, ny = e.y + dy;
+      const nx = ex + dx, ny = ey + dy;
       if (!transitable(sala, nx, ny) || ocupada(sala, nx, ny, e)) continue;
       const v = dm[ny * g.w + nx];
       if (v > mejorV) { mejorV = v; mejor = [nx, ny]; }
     }
-    if (mejor) moverA(sala, e, mejor[0], mejor[1]);
+    if (mejor) fijarWp(e, mejor[0], mejor[1]);
     return;
   }
 
   if (comp === 'cazador' && e.dormidaHasta > 0) {
-    e.dormidaHasta -= PERIODO_PASO;
+    e.dormidaHasta -= PERIODO_CEREBRO;
     if (e.dormidaHasta <= 0) sala.difundir({ t: 'aviso2', txt: 'EL CAZADOR HA DESPERTADO.' });
     return;
   }
@@ -299,16 +317,31 @@ function pasoEntidad(sala, e, ahora) {
   }
 }
 
-function tick(sala, ahora) {
+function tick(sala, ahora, dt) {
   if (!sala.entidades.length || !sala.jugadores.size) return;
   sala._dmap = dmapJugadores(sala);
+  sala._entMovidas = sala._entMovidas || [];
   for (const e of sala.entidades) {
     if (!e.viva) continue;
     resolverTelegraph(sala, e, ahora);
-    if (ahora < e.proximoPaso) continue;
-    const vel = e.def.velocidad || 1;
-    e.proximoPaso = ahora + PERIODO_PASO / vel;
-    pasoEntidad(sala, e, ahora);
+    // CEREBRO: decide waypoint/ataque a su cadencia
+    if (ahora >= e.proximoPaso) {
+      e.proximoPaso = ahora + PERIODO_CEREBRO;
+      pasoEntidad(sala, e, ahora);
+    }
+    // CUERPO: avanza en continuo hacia su waypoint en cada tick
+    if (e.wp && !e.preparando && ahora >= e.paralizadaHasta) {
+      const tx = e.wp[0], ty = e.wp[1];
+      const dx = tx - e.x, dy = ty - e.y;
+      const d = Math.hypot(dx, dy);
+      if (d < 0.08) { e.x = tx; e.y = ty; e.wp = null; }
+      else {
+        const [nx, ny] = Fisica.mover(sala.map.grid, e.x, e.y, dx, dy, dt || 0.1, velDe(e), RADIO_ENT);
+        if (Fisica.dist(nx, ny, e.x, e.y) < 0.001) e.wp = null; // atascada: que decida otra cosa
+        e.x = nx; e.y = ny;
+      }
+      sala._entMovidas.push(e);
+    }
   }
   if (sala.ruido && ahora > sala.ruido.hasta) sala.ruido = null;
 }

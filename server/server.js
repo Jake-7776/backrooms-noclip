@@ -54,6 +54,10 @@ const servidor = http.createServer((req, res) => {
 const wss = new WebSocketServer({ server: servidor, path: '/ws' });
 const porIp = new Map(); // ip -> nº de conexiones
 
+function sala2enviar(ws, msg) {
+  if (ws.readyState === 1) ws.send(JSON.stringify(msg));
+}
+
 wss.on('connection', (ws, req) => {
   // Detrás de Caddy todos llegan como 127.0.0.1: la IP real va en X-Forwarded-For.
   // En desarrollo (conexión loopback directa, sin cabecera) no se aplica el cap
@@ -79,6 +83,12 @@ wss.on('connection', (ws, req) => {
     if (m.t === 'hola') {
       if (jug) return; // ya presentado
       clearTimeout(timbre);
+      if ((m.v | 0) !== P.VERSION) {
+        // cliente de una versión vieja: que recargue la página
+        sala2enviar(ws, { t: 'error', txt: 'Versión nueva del juego: recarga la página (Ctrl+F5).' });
+        ws.close(1008, 'version');
+        return;
+      }
       const nombre = filtro.nombreLimpio(m.nombre);
       const expediente = db.conectar(m.token, nombre);
       if (expediente.baneado) { ws.close(1008, 'baneado'); return; }
@@ -95,8 +105,8 @@ wss.on('connection', (ws, req) => {
       return;
     }
     if (!jug) return; // todo lo demás exige estar dentro
-    if (m.t === 'mover') sala.mover(jug, m.dx, m.dy);
-    else if (m.t === 'rot') sala.girar(jug, m.rot);
+    if (m.t === 'input') sala.input(jug, m.dx, m.dy);
+    else if (m.t === 'rot') sala.girar(jug, m.th);
     else if (m.t === 'accion') sala.accion(jug);
     else if (m.t === 'cruzar') sala.cruzar(jug, m.si);
     else if (m.t === 'usar') sala.usar(jug, m.mano);

@@ -19,7 +19,7 @@
 //   {t:'pong'}
 'use strict';
 
-const VERSION = 1;
+const VERSION = 2; // v22: movimiento libre (input vectorial); los clientes v1 se rechazan
 const MAX_MSG = 512;          // bytes por mensaje entrante
 const MAX_CHAT = 120;         // caracteres de un chat
 const COOLDOWN_MOVER = 165;   // ms entre pasos (el cliente usa 170: margen de jitter)
@@ -41,15 +41,15 @@ function leer(raw) {
       if (m.token.length > 64) return null;
       if (m.nivel !== undefined && (typeof m.nivel !== 'string' || m.nivel.length > 32)) return null;
       return m;
-    case 'mover': {
-      const dx = m.dx | 0, dy = m.dy | 0;
-      if (Math.abs(dx) + Math.abs(dy) !== 1) return null; // solo casilla adyacente
-      return { t: 'mover', dx, dy };
+    case 'input': { // v22: ESTADO de movimiento (vector deseado; la velocidad la pone el servidor)
+      const dx = +m.dx, dy = +m.dy;
+      if (!isFinite(dx) || !isFinite(dy)) return null;
+      return { t: 'input', dx: Math.max(-1, Math.min(1, dx)), dy: Math.max(-1, Math.min(1, dy)) };
     }
-    case 'rot': {
-      const rot = m.rot | 0;
-      if (rot < 0 || rot > 3) return null;
-      return { t: 'rot', rot };
+    case 'rot': { // v22: ángulo continuo en radianes (θ=0 norte, θ=π/2 este)
+      const th = +m.th;
+      if (!isFinite(th)) return null;
+      return { t: 'rot', th };
     }
     case 'chat':
       if (typeof m.txt !== 'string') return null;
