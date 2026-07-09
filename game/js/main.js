@@ -363,6 +363,7 @@
     if (world.over || !gameScreen || gameScreen.style.display === 'none' ||
         !world.level || !world.player || !world.entities?.length) {
       if (smilerThreatEl) smilerThreatEl.style.opacity = '0';
+      if (window.Sfx?.updateEntityLoops) Sfx.updateEntityLoops();
       return;
     }
     let best = null, bestD = Infinity;
@@ -380,6 +381,7 @@
     }
     if (!best) {
       if (smilerThreatEl) smilerThreatEl.style.opacity = '0';
+      if (window.Sfx?.updateEntityLoops) Sfx.updateEntityLoops();
       return;
     }
     if (!smilerThreatEl) {
@@ -393,6 +395,7 @@
     const escala = 0.45 + k * k * 7.5;
     smilerThreatEl.style.opacity = String(Math.max(0, Math.min(0.92, k * 1.15)));
     smilerThreatEl.style.transform = `translate(-50%, -50%) scale(${escala})`;
+    if (window.Sfx?.entityLoop) Sfx.entityLoop('smiler', bestD, 8);
   }
 
   function loop(t) {
