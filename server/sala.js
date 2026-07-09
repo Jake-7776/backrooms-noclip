@@ -183,13 +183,29 @@ class Sala {
     const mascara = jug.equipo.cara === 'mascara_gas' || trajeHostil || proteccionQuimica;
     const chaqueta = jug.equipo.cuerpo === 'chaqueta' || trajeHostil;
     const botas = jug.equipo.pies === 'botas_reforzadas';
-    let cambioSed = -pasos;
-    let cambioCordura = 0;
-    if (reglas.includes('calor')) cambioSed -= pasos;
-    if (reglas.some((r) => ['zumbido', 'alucinaciones', 'aislamiento', 'vigilado'].includes(r)))
-      cambioCordura -= Math.ceil(pasos / (mascara ? 8 : 4));
-    jug.sed = Math.max(0, jug.sed + cambioSed);
-    jug.cordura = Math.max(0, jug.cordura + cambioCordura);
+    // sed y cordura drenan por TILES reales acumulados con la MISMA cadencia
+    // que el modo offline (1 turno ≈ 1 tile: sed base -1/9, calor -1/4;
+    // cordura -1/20 con zumbido o -1/25 con alucinaciones/aislamiento/
+    // vigilado, doblado con máscara/protección). Antes se descontaba por
+    // "pasos" de 4 tiles con Math.ceil(), 5-6× más rápido de lo debido y sin
+    // que la máscara marcara diferencia real (ceil(1/8) y ceil(1/4) daban 1).
+    const tiles = pasos * 4;
+    jug._sedAcum = (jug._sedAcum || 0) + tiles;
+    const cadSed = reglas.includes('calor') ? 4 : 9;
+    if (jug._sedAcum >= cadSed) {
+      const n = Math.floor(jug._sedAcum / cadSed);
+      jug._sedAcum -= n * cadSed;
+      jug.sed = Math.max(0, jug.sed - n);
+    }
+    if (reglas.some((r) => ['zumbido', 'alucinaciones', 'aislamiento', 'vigilado'].includes(r))) {
+      jug._corduraAcum = (jug._corduraAcum || 0) + tiles;
+      const cadCordura = (reglas.includes('zumbido') ? 20 : 25) * (mascara ? 2 : 1);
+      if (jug._corduraAcum >= cadCordura) {
+        const n = Math.floor(jug._corduraAcum / cadCordura);
+        jug._corduraAcum -= n * cadCordura;
+        jug.cordura = Math.max(0, jug.cordura - n);
+      }
+    }
     if (reglas.includes('frio') && !chaqueta) this.herir(jug, pasos, 'el frío');
     // Los charcos sirena son una amenaza física del terreno: las botas
     // anulan el arrastre cuando el jugador pisa una casilla de agua.
