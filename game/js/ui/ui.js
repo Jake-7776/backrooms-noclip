@@ -223,6 +223,33 @@
     }
   }
 
+  function highlightSlots(active, itemId) {
+    for (const id of ['bp-mano-0', 'bp-mano-1', 'mano-0', 'mano-1', 'eq-cara', 'eq-cuerpo', 'eq-pies']) {
+      const el = $(id);
+      if (el) el.classList.remove('slot-highlight-valid');
+    }
+    if (!active || !itemId) return;
+    const def = world.data.objects[itemId];
+    if (!def) return;
+    if (def.equipo) {
+      const el = $('eq-' + def.equipo);
+      if (el) el.classList.add('slot-highlight-valid');
+    } else {
+      for (const id of ['bp-mano-0', 'bp-mano-1', 'mano-0', 'mano-1']) {
+        const el = $(id);
+        if (el) el.classList.add('slot-highlight-valid');
+      }
+    }
+  }
+
+  function highlightBackpackGrid(active) {
+    const el = $('backpack-slots');
+    if (el) {
+      if (active) el.classList.add('slot-highlight-valid');
+      else el.classList.remove('slot-highlight-valid');
+    }
+  }
+
   function renderBackpack() {
     const cont = $('backpack-slots');
     cont.innerHTML = '';
@@ -243,7 +270,16 @@
         slot.appendChild(nom);
         slot.title = `${def.nombre} — ${def.descripcion}`;
         slot.draggable = true;
-        slot.addEventListener('dragstart', (e) => e.dataTransfer.setData('text/plain', String(i)));
+        slot.addEventListener('dragstart', (e) => {
+          e.stopPropagation();
+          e.dataTransfer.setData('text/plain', String(i));
+          setTimeout(() => {
+            highlightSlots(true, id);
+          }, 0);
+        });
+        slot.addEventListener('dragend', () => {
+          highlightSlots(false);
+        });
         slot.onclick = () => showItemInfo(i, ic);
       }
       cont.appendChild(slot);
@@ -358,7 +394,16 @@
         return Game.usarMano(m);
       };
       el.draggable = true;
-      el.addEventListener('dragstart', (e) => e.dataTransfer.setData('text/plain', 'mano:' + m));
+      el.addEventListener('dragstart', (e) => {
+        e.stopPropagation();
+        e.dataTransfer.setData('text/plain', 'mano:' + m);
+        setTimeout(() => {
+          highlightBackpackGrid(true);
+        }, 0);
+      });
+      el.addEventListener('dragend', () => {
+        highlightBackpackGrid(false);
+      });
       el.addEventListener('dragover', (e) => e.preventDefault());
       el.addEventListener('drop', (e) => {
         e.preventDefault();
@@ -382,7 +427,16 @@
     if (!el) continue;
     el.onclick = () => Game.quitarEquipo(tipo);
     el.draggable = true;
-    el.addEventListener('dragstart', (e) => e.dataTransfer.setData('text/plain', 'eq:' + tipo));
+    el.addEventListener('dragstart', (e) => {
+      e.stopPropagation();
+      e.dataTransfer.setData('text/plain', 'eq:' + tipo);
+      setTimeout(() => {
+        highlightBackpackGrid(true);
+      }, 0);
+    });
+    el.addEventListener('dragend', () => {
+      highlightBackpackGrid(false);
+    });
     el.addEventListener('dragover', (e) => e.preventDefault());
     el.addEventListener('drop', (e) => {
       e.preventDefault();
@@ -842,6 +896,21 @@
   }
   $('btn-codex-close').onclick = () => toggleCodex(false);
 
+  // ---------- changelog ----------
+  let changelogVisible = false;
+  function toggleChangelog(force) {
+    changelogVisible = force !== undefined ? force : !changelogVisible;
+    if (changelogVisible && document.pointerLockElement) document.exitPointerLock();
+    $('changelog-panel').style.display = changelogVisible ? 'flex' : 'none';
+    if (changelogVisible && window.Changelog) Changelog.render($('changelog-list'));
+    if (world.level && !world.over) {
+      if (changelogVisible) world.busy = true;
+      else if ($('exit-modal').style.display === 'none' && $('dice-overlay').style.display === 'none')
+        world.busy = false;
+    }
+  }
+  $('btn-changelog-close').onclick = () => toggleChangelog(false);
+
   // ---------- fin ----------
   function showEnd(victoria, causa) {
     if (!world._muerteSmiler) document.body.classList.remove('smiler-death');
@@ -861,7 +930,7 @@
   world.ui = {
     log, updateHUD, flashDamage, showLevelCard, showDice,
     showExitModal, showLevelPicker, showChoice, toggleJournal, showEnd, show, toggleCodex,
-    toggleBackpack, toggleLog, showInstintos, pulsarMano,
+    toggleBackpack, toggleLog, showInstintos, pulsarMano, toggleChangelog,
     get flashT() { return flashT; },
   };
 })();

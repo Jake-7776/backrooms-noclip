@@ -123,6 +123,7 @@
         ctx.save();
         ctx.translate(px, py);
         ctx.rotate(ang);
+        // Hoja metálica estándar (bisturí)
         ctx.fillStyle = e.color;                      // hoja
         ctx.beginPath();
         ctx.moveTo(7, 0); ctx.lineTo(-3, -2.5); ctx.lineTo(-3, 2.5);

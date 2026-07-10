@@ -275,6 +275,17 @@
         break;
       }
       case 'canalFin': break;
+      case 'golpe': {
+        const p = posDe(m.id);
+        if (p) {
+          // Golpe a corta distancia (tubería, etc.)
+          if (window.Effects) {
+            Effects.flash(m.x, m.y, '#e8c95a');
+          }
+          if (window.Sfx && cerca(w, m.x, m.y, 12)) Sfx.play('golpe');
+        }
+        break;
+      }
       case 'abierto': {
         const ex = w.map.exits[m.i];
         if (!ex) return;
@@ -590,6 +601,7 @@
 
   function admin(clave) { enviar({ t: 'admin', clave }); }
   function tp(nivelId) { enviar({ t: 'chat', txt: '/tp ' + nivelId }); }
+  function give(itemId) { enviar({ t: 'chat', txt: '/give ' + itemId }); }
 
   // ---------- chat ----------
   function crearChatUI() {
@@ -640,7 +652,7 @@
 
   window.Net = {
     iniciar, setInput, setMov, setRot, parar, frame,
-    accion, usar, luzToggle, mochila, admin, tp,
+    accion, usar, luzToggle, mochila, admin, tp, give,
     abrirChat, chatAbierto,
     get activo() { return listo; },
     get id() { return miId; },

@@ -1,7 +1,7 @@
 // Arranque: input, bucle de animación y pantalla de título.
 (function () {
   // versión visible del juego (Ajustes); súbela con cada tanda de cambios
-  window.VERSION_JUEGO = 'v26.6';
+  window.VERSION_JUEGO = 'v27.3';
   const world = Game.world;
   world.data = window.GAME_DATA;
 
@@ -202,9 +202,20 @@
     }
     document.documentElement.style.setProperty('--game-w', `${w}px`);
     document.documentElement.style.setProperty('--game-h', `${h}px`);
-    if (canvas.width !== w || canvas.height !== h) {
-      canvas.width = w; canvas.height = h;
-      if (use3D && Render3D.resize) Render3D.resize(w, h);
+    
+    // Cuentas de resolución interna para rendimiento (máx 1280 de ancho)
+    let rw = w;
+    let rh = h;
+    const maxDimension = 1280;
+    if (w > maxDimension) {
+      const scale = maxDimension / w;
+      rw = Math.round(w * scale);
+      rh = Math.round(h * scale);
+    }
+
+    if (canvas.width !== rw || canvas.height !== rh) {
+      canvas.width = rw; canvas.height = rh;
+      if (use3D && Render3D.resize) Render3D.resize(rw, rh);
     }
     document.body.classList.toggle('fs', fs);
   }
@@ -248,7 +259,7 @@
     wrap.addEventListener('mousedown', (ev) => {
       if (!world.online || !use3D || Render3D.modo !== 'tercera') return;
       if (world.busy) return;
-      if (ev.target.closest('button, input, select, #backpack-panel, #log-panel, #journal-panel, #codex-panel, #sound-menu, .choice-modal, .modal-box')) return;
+      if (ev.target.closest('button, input, select, #backpack-panel, #log-panel, #journal-panel, #codex-panel, #changelog-panel, #sound-menu, .choice-modal, .modal-box')) return;
       const modo = window.OPTS.camaraModo || 'libre';
       if (modo === 'libre') {
         if (ev.button !== 0) return; // clic izquierdo engancha el puntero
@@ -322,7 +333,7 @@
     const admin = !!world.esAdmin;
     const enJuego = world.level && !world.over;
     document.getElementById('admin-row').style.display = admin ? 'none' : 'flex';
-    document.getElementById('debug-row').style.display = admin && enJuego ? 'flex' : 'none';
+    document.getElementById('debug-container').style.display = admin && enJuego ? 'block' : 'none';
     document.getElementById('debug-stats').style.display = admin && enJuego ? 'block' : 'none';
     if (admin) world.ui.updateHUD();
   }
@@ -358,7 +369,7 @@
     };
   }
 
-  // ---------- debug (v20.2→v23): teleport a cualquier nivel, solo guardián ----------
+  // ---------- debug (v20.2→v23): teleport a cualquier nivel e items, solo guardián ----------
   {
     const sel = document.getElementById('debug-nivel');
     const niveles = Object.values(world.data.levels).slice().sort((a, b) => {
@@ -380,6 +391,32 @@
       if (world.online && window.Net && Net.activo) Net.tp(id);
       else Game.debugTeleport(id);
     };
+
+    const selObj = document.getElementById('debug-objeto');
+    if (selObj) {
+      const objetos = Object.entries(world.data.objects).sort((a, b) => a[1].nombre.localeCompare(b[1].nombre));
+      for (const [id, obj] of objetos) {
+        const o = document.createElement('option');
+        o.value = id;
+        o.textContent = obj.nombre || id;
+        selObj.appendChild(o);
+      }
+      document.getElementById('btn-debug-item').onclick = () => {
+        const id = selObj.value;
+        if (!world.esAdmin || !world.level || world.over || !world.data.objects[id]) return;
+        if (world.online && window.Net && Net.activo) {
+          Net.give(id);
+        } else {
+          if (world.player.inv.length >= 6) {
+            world.log('Mochila llena. No puedes añadir más objetos.', 'danger');
+            return;
+          }
+          world.player.inv.push(id);
+          world.log(`[Debug] Añadido: ${world.data.objects[id].nombre} a tu mochila.`, 'good');
+          world.ui.updateHUD();
+        }
+      };
+    }
   }
   // mochila (v15): botón del HUD y cierre del panel
   const btnMochila = document.getElementById('btn-mochila');
@@ -502,6 +539,7 @@
   function isUIOpen() {
     if (document.getElementById('backpack-panel')?.style.display !== 'none') return true;
     if (document.getElementById('codex-panel')?.style.display !== 'none') return true;
+    if (document.getElementById('changelog-panel')?.style.display !== 'none') return true;
     if (document.getElementById('journal-panel')?.style.display !== 'none') return true;
     if (document.getElementById('sound-menu')?.style.display !== 'none') return true;
     if (document.getElementById('gamepad-menu')?.style.display !== 'none') return true;
@@ -1348,6 +1386,7 @@
     ev.target.value = '';
   };
   $id('btn-codex').onclick = () => world.ui.toggleCodex(true);
+  $id('btn-changelog').onclick = () => world.ui.toggleChangelog(true);
 
   $id('btn-start').onclick = () => {
     conectarAlServidor($id('btn-start'));
@@ -1367,7 +1406,12 @@
     for (const el of [capaTactil, wrap]) {
       if (!el) continue;
       for (const evName of ['contextmenu', 'selectstart', 'dragstart']) {
-        el.addEventListener(evName, (ev) => ev.preventDefault());
+        el.addEventListener(evName, (ev) => {
+          if (evName === 'dragstart' && ev.target.closest('#backpack-panel, .mano-slot, .eq-slot, .inv-slot')) {
+            return;
+          }
+          ev.preventDefault();
+        });
       }
     }
   }

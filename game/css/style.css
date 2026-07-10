@@ -259,12 +259,12 @@ input[type="range"]::-moz-range-thumb {
 .chk-row input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--amarillo);
   cursor: pointer; vertical-align: middle; margin-right: 6px; }
 /* v20.2: fila de debug (teleport a niveles) */
-#debug-nivel, #opt-camara-modo { flex: 1; background: #0a0906; border: 1px solid var(--borde);
+#debug-nivel, #debug-objeto, #opt-camara-modo { flex: 1; background: #0a0906; border: 1px solid var(--borde);
   color: var(--amarillo); font-family: inherit; font-size: 16px; padding: 7px 10px;
   cursor: pointer; min-width: 0; box-sizing: border-box; }
 /* el desplegable de cámara va en blanco hueso, como el resto del menú */
 #opt-camara-modo, #opt-camara-modo option { color: var(--hueso); background: #0a0906; }
-#debug-row { border-top: 1px dashed var(--borde); padding-top: 10px; }
+#debug-container { border-top: 1px dashed var(--borde); padding-top: 10px; margin-top: 10px; }
 /* v23: contraseña de guardián + versión del juego en Ajustes */
 #admin-row { border-top: 1px dashed var(--borde); padding-top: 10px; }
 #admin-clave { flex: 1; background: #0a0906; border: 1px solid var(--borde);
@@ -433,7 +433,7 @@ body.fs #game-canvas, body.fs #gl-canvas { border: none; box-shadow: none; }
 }
 
 /* ---------- códice ---------- */
-#codex-panel { position: fixed; inset: 0; background: rgba(3,3,2,.88);
+#codex-panel, #changelog-panel { position: fixed; inset: 0; background: rgba(3,3,2,.88);
   display: flex; align-items: center; justify-content: center; z-index: 30; }
 .codex-box { width: min(720px, 94vw); max-height: 88vh; overflow: auto;
   border: 8px solid transparent; border-image: var(--marco) 8 fill stretch;
@@ -455,6 +455,9 @@ details.cdx[open] > summary::before { transform: rotate(90deg); }
 details.cdx > summary:hover { background: #14120c; }
 .cdx-n { margin-left: auto; color: var(--gris); font-size: 14px; letter-spacing: 0; }
 details.cdx > div, details.cdx > ol { padding: 6px 14px 12px; }
+.changelog-ul { padding: 6px 14px 12px 30px; margin: 0; }
+.changelog-ul li { color: #cfc8b0; font-size: 14.5px; line-height: 1.55; margin-bottom: 4px; }
+.changelog-ul li::marker { color: var(--amarillo-osc); }
 .cdx-nivel { border: 1px solid var(--borde); border-left: 4px solid #888;
   margin-bottom: 4px; background: #0f0e0a; }
 .cdx-nivel > summary { list-style: none; cursor: pointer; padding: 6px 10px;
@@ -503,3 +506,12 @@ details.cdx > div, details.cdx > ol { padding: 6px 14px 12px; }
 ::-webkit-scrollbar-thumb { background: var(--amarillo-osc); border: 1px solid #0a0906; }
 ::-webkit-scrollbar-thumb:hover { background: var(--amarillo); }
 * { scrollbar-width: thin; scrollbar-color: var(--amarillo-osc) #0a0906; }
+
+/* v26.8: resalte de arrastre para ranuras válidas */
+.slot-highlight-valid {
+  border-color: var(--amarillo) !important;
+  box-shadow: 0 0 10px rgba(217, 198, 110, 0.45) !important;
+  background: rgba(217, 198, 110, 0.12) !important;
+  transition: border-color 0.15s, box-shadow 0.15s, background-color 0.15s;
+}
+
