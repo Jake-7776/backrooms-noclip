@@ -21,9 +21,6 @@
   // ve por encima → nunca se rompe la sensación de interior)
   const WALL_H = CAM_MODO === 'tercera' ? 2.3 : 1.2;
   const SPRITE_H = 1.05;   // alto del billboard de actores
-  // profundidad de la extrusión 2.5D (sprite3d.js), en unidades de tile
-  const EXTRUDE_DEPTH_ACTOR = 0.16;  // jugador, entidades, jugadores remotos
-  const EXTRUDE_DEPTH_ITEM = 0.10;   // objetos del suelo
   const ROT_VEC = [[0, -1], [1, 0], [0, 1], [-1, 0]]; // norte, este, sur, oeste
 
   let renderer, scene, camera, amb, plight, spot, dlight;
@@ -44,7 +41,6 @@
   let playerSprite = null;
   let playerMaskSprite = null;   // capa opcional (máscara de gas) sobre el jugador
   let texCache = new Map();      // clave -> THREE.Texture
-  let geomCache = new Map();     // clave -> BufferGeometry lateral (sprite3d.js), mismas claves que texCache
   let grain = null;
   let camBobT = 0;
   let panelMats = [];            // grupos independientes de fluorescentes
@@ -79,22 +75,6 @@
     t.encoding = THREE.sRGBEncoding;
     if (key) texCache.set(key, t);
     return t;
-  }
-
-  // resuelve (con caché) las texturas frente/dorso y la geometría lateral
-  // que necesita SpriteExtrude para una visual dada — misma clave que ya usa
-  // el resto del render para la textura frontal (spriteTex/spriteTexFlip,
-  // 'item-'+id+'-'+sv...); backTex solo espeja el canvas en un cache-miss
-  function extrudeVisual(canvas, key, depth) {
-    const frontTex = tex(canvas, key);
-    const backKey = key + '::back';
-    const backTex = texCache.has(backKey) ? texCache.get(backKey) : tex(SpriteExtrude.mirrorCanvas(canvas), backKey);
-    let sideGeo = geomCache.get(key);
-    if (!sideGeo) {
-      sideGeo = SpriteExtrude.buildSideGeometry(canvas, depth);
-      geomCache.set(key, sideGeo);
-    }
-    return { frontTex, backTex, sideGeo };
   }
 
   function init(gl, ov) {
@@ -387,11 +367,7 @@
   function disposeGrupo(grupo, keepTex) {
     if (!grupo) return;
     grupo.traverse((o) => {
-      // geometría compartida entre instancias (plano unidad + laterales
-      // cacheadas por sprite3d.js/geomCache) NO se dispone aquí — vive toda
-      // la sesión; limpiarActores() pasa por este camino en cada cambio de
-      // nivel y disponerla la corrompería para el resto de actores vivos
-      if (o.geometry && !o.geometry.userData?.compartida) o.geometry.dispose();
+      if (o.geometry) o.geometry.dispose();
       if (o.material) {
         const mats = Array.isArray(o.material) ? o.material : [o.material];
         for (const m of mats) { if (!keepTex && m.map) m.map.dispose(); m.dispose(); }
@@ -1112,19 +1088,17 @@
   // sprites de los objetos del suelo: baratos, indexados por posición en el
   // array — se rehacen enteros al cambiar el mapa o world.itemsVersion (tirar)
   function rebuildItems(world) {
-    for (const s of itemSprites.values()) { actorGroup.remove(s.group); s.dispose(); }
+    for (const s of itemSprites.values()) { actorGroup.remove(s); s.material.dispose(); }
     itemSprites.clear();
     for (let i = 0; i < world.map.items.length; i++) {
       const it = world.map.items[i];
       if (it.taken) continue;
       const c = Render.itemToCanvas(it.id, world.data.objects);
       const sv = window.Sprites?.version ? Sprites.version() : 0;
-      const { frontTex, backTex, sideGeo } = extrudeVisual(c, 'item-' + it.id + '-' + sv, EXTRUDE_DEPTH_ITEM);
-      const s = SpriteExtrude.createActor(EXTRUDE_DEPTH_ITEM);
-      s.setVisual(frontTex, backTex, sideGeo);
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex(c, 'item-' + it.id + '-' + sv), transparent: true }));
       s.scale.set(0.55, 0.6, 1);
       s.position.set(it.x + 0.5, 0.22, it.y + 0.5);
-      actorGroup.add(s.group);
+      actorGroup.add(s);
       itemSprites.set(i, s);
     }
     itemsVersionVista = world.itemsVersion || 0;
@@ -1154,14 +1128,18 @@
     }
   }
 
-  function spriteVisual(glyph, frame) {
+  function spriteTex(glyph, frame) {
+    const key = 'ent-' + glyph + '-' + frame;
+    if (texCache.has(key)) return texCache.get(key);
     const c = Sprites.get(glyph, frame);
-    return c ? extrudeVisual(c, 'ent-' + glyph + '-' + frame, EXTRUDE_DEPTH_ACTOR) : null;
+    return c ? tex(c, key) : null;
   }
 
-  function spriteVisualFlip(glyph, frame, flip) {
+  function spriteTexFlip(glyph, frame, flip) {
+    const key = 'ent-' + glyph + '-' + frame + (flip ? '-f' : '');
+    if (texCache.has(key)) return texCache.get(key);
     const c = Sprites.get(glyph, frame, flip);
-    return c ? extrudeVisual(c, 'ent-' + glyph + '-' + frame + (flip ? '-f' : ''), EXTRUDE_DEPTH_ACTOR) : null;
+    return c ? tex(c, key) : null;
   }
 
   function entVisible(world, e) {
@@ -1176,11 +1154,17 @@
   }
 
   // fallback: entidades vectoriales (sin matriz de píxeles) → snapshot del dibujo 2D
-  function entCanvasVisual(e, frame) {
+  function entCanvas(e, frame) {
     const key = 'entvec-' + e.def.glyph + '-' + frame;
+    if (texCache.has(key)) return texCache.get(key);
     const c = document.createElement('canvas');
     c.width = 48; c.height = 48;
     const o = c.getContext('2d');
+    // usa el dibujante 2D existente sobre este canvas
+    const fake = Object.create(e);
+    fake.revelada = true;
+    const octxOld = o; // Render._drawEntity dibuja en su ctx interno: usamos exportador
+    // Render._drawEntity no acepta ctx externo: replicamos con sprites.get o círculo
     const spr = Sprites.get(e.def.glyph, frame);
     if (spr) o.drawImage(spr, 0, 0);
     else {
@@ -1188,7 +1172,7 @@
       o.beginPath(); o.arc(24, 24, 12, 0, 7); o.fill();
       o.strokeStyle = 'rgba(0,0,0,0.6)'; o.stroke();
     }
-    return extrudeVisual(c, key, EXTRUDE_DEPTH_ACTOR);
+    return tex(c, key);
   }
 
   function actualizarLucesTecho(world, px, pz, fase0) {
@@ -1302,9 +1286,9 @@
     const p = world.player;
     const px = p.rx + 0.5, pz = p.ry + 0.5;
     if (!playerSprite) {
-      playerSprite = SpriteExtrude.createActor(EXTRUDE_DEPTH_ACTOR);
+      playerSprite = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true }));
       playerSprite.scale.set(1, SPRITE_H, 1);
-      actorGroup.add(playerSprite.group);
+      actorGroup.add(playerSprite);
     }
     if (!playerMaskSprite) {
       // capa de la máscara de gas: billboard aparte pegado al del cuerpo, sin
@@ -1345,11 +1329,10 @@
     // malherido: el propio sprite lo cuenta (sangre y palidez)
     if (p.salud < 35 && Sprites.tiene(sid + '_herido')) sid += '_herido';
     const pframe = world.moving ? Math.floor(t / 150) % Sprites.frameCount(sid) : 0;
-    const pVisual = spriteVisualFlip(sid, pframe, sflip);
-    if (pVisual) playerSprite.setVisual(pVisual.frontTex, pVisual.backTex, pVisual.sideGeo);
+    playerSprite.material.map = spriteTexFlip(sid, pframe, sflip);
+    playerSprite.material.needsUpdate = true;
     playerSprite.position.set(px, SPRITE_H / 2 + 0.02, pz);
     playerSprite.visible = !world.escondido; // dentro de un mueble no se te ve
-    if (playerSprite.visible) playerSprite.faceCamera(camera);
 
     // capa de la máscara de gas (PUESTA en la ranura de cara): PNG opcional
     const conMascara = world.equipado && world.equipado('mascara_gas') && Sprites.tiene(maskId);
@@ -1367,30 +1350,30 @@
       if (!e.viva) {
         // disolución de muerte: se desvanece elevándose (en vez de esfumarse de golpe)
         if (s && s.visible) {
-          if (!e._muerteT) { e._muerteT = t; s.setDeathFade(); }
+          if (!e._muerteT) e._muerteT = t;
           const k = (t - e._muerteT) / 450;
-          if (k >= 1) { s.visible = false; s.setOpacity(1); }
+          if (k >= 1) { s.visible = false; s.material.opacity = 1; }
           else {
-            s.setOpacity(1 - k);
+            s.material.opacity = 1 - k;
             s.position.y = SPRITE_H / 2 + 0.02 + k * 0.22;
-            s.faceCamera(camera);
           }
         }
         continue;
       }
       if (!s) {
-        s = SpriteExtrude.createActor(EXTRUDE_DEPTH_ACTOR);
+        s = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true }));
         s.scale.set(1, SPRITE_H, 1);
-        if (e.def.glyph === 'smiler') s.setFog(false); // brilla en la oscuridad
-        actorGroup.add(s.group);
+        if (e.def.glyph === 'smiler') s.material.fog = false; // brilla en la oscuridad
+        actorGroup.add(s);
         entitySprites.set(e.uid, s);
       }
       const visible = entVisible(world, e);
       s.visible = visible;
       if (!visible) continue;
       const frame2 = Math.floor(t / 280) % Sprites.frameCount(e.def.glyph);
-      const eVisual = spriteVisual(e.def.glyph, frame2) || entCanvasVisual(e, frame2);
-      s.setVisual(eVisual.frontTex, eVisual.backTex, eVisual.sideGeo);
+      const tx = spriteTex(e.def.glyph, frame2) || entCanvas(e, frame2);
+      s.material.map = tx;
+      s.material.needsUpdate = true;
       // embestida de ataque
       let ox = 0, oz = 0;
       if (e._atkT !== undefined) {
@@ -1402,21 +1385,17 @@
         }
       }
       // tinte de estado
-      s.setTint(e.paralizada > 0 ? 0x77ccff : 0xffffff);
-      if (e.preparando) s.setTint(Math.floor(t / 130) % 2 ? 0xffcc66 : 0xffffff); // ⚠ parpadea
-      if (e._hitT && t - e._hitT < 170) s.setTint(0xffaaaa);
+      s.material.color.setHex(e.paralizada > 0 ? 0x77ccff : 0xffffff);
+      if (e.preparando) s.material.color.setHex(Math.floor(t / 130) % 2 ? 0xffcc66 : 0xffffff); // ⚠ parpadea
+      if (e._hitT && t - e._hitT < 170) s.material.color.setHex(0xffaaaa);
       s.position.set(e.rx + 0.5 + ox, SPRITE_H / 2 + 0.02, e.ry + 0.5 + oz);
-      s.faceCamera(camera);
       // respiración sutil (cada entidad con su fase: el grupo no late al unísono)
       e._fase = e._fase ?? Math.random() * 6.28;
       s.scale.y = SPRITE_H * (1 + 0.018 * Math.sin(t * 0.004 + e._fase));
     }
 
     // objetos recogidos
-    for (const [i, s] of itemSprites) {
-      s.visible = !(world.map.items[i]?.taken ?? true);
-      if (s.visible) s.faceCamera(camera);
-    }
+    for (const [i, s] of itemSprites) s.visible = !(world.map.items[i]?.taken ?? true);
 
     // jugadores remotos (BACKROOMS MMO): mismo patrón que las entidades, con el
     // sprite del jugador orientado según su rotación relativa a la cámara
@@ -1432,22 +1411,21 @@
         if (o.escondido) { const sE = otrosSprites.get(o.id); if (sE) sE.visible = false; continue; }
         let s = otrosSprites.get(o.id);
         if (!s) {
-          s = SpriteExtrude.createActor(EXTRUDE_DEPTH_ACTOR);
+          s = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true }));
           s.scale.set(1, SPRITE_H, 1);
-          actorGroup.add(s.group);
+          actorGroup.add(s);
           otrosSprites.set(o.id, s);
         }
         const [sid2, flip2] = Otros.spriteDe(o, camDir);
         const f2 = (Math.abs(o.rx - o.x) + Math.abs(o.ry - o.y) > 0.03)
           ? Math.floor(t / 150) % Sprites.frameCount(sid2) : 0;
         s.visible = true;
-        const oVisual = spriteVisualFlip(sid2, f2, flip2);
-        if (oVisual) s.setVisual(oVisual.frontTex, oVisual.backTex, oVisual.sideGeo);
+        s.material.map = spriteTexFlip(sid2, f2, flip2);
+        s.material.needsUpdate = true;
         s.position.set(o.rx + 0.5, SPRITE_H / 2 + 0.02, o.ry + 0.5);
-        s.faceCamera(camera);
       }
       for (const [id, s] of otrosSprites)
-        if (!vivos.has(id)) { actorGroup.remove(s.group); s.dispose(); otrosSprites.delete(id); }
+        if (!vivos.has(id)) { actorGroup.remove(s); s.material.dispose(); otrosSprites.delete(id); }
     }
 
     // En el último tramo de Level 0, los mismos materiales pierden el amarillo
@@ -1660,7 +1638,7 @@
       // si la cámara queda pegada (muro a la espalda), el personaje se desvanece
       // en vez de tapar media pantalla
       const dCam = camera.position.distanceTo(new THREE.Vector3(px, 1.0, pz));
-      playerSprite.setOpacity(Math.max(0, Math.min(1, (dCam - 0.85) / 0.9)));
+      playerSprite.material.opacity = Math.max(0, Math.min(1, (dCam - 0.85) / 0.9));
     } else {
       // --- cámara Octopath clásica (?cam=alta): inercia, bob sutil, rotación Q/E ---
       if (world.moving) camBobT += 0.11;
