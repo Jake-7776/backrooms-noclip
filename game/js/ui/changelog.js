@@ -4,6 +4,10 @@
 // tanda de cambios (junto con VERSION_JUEGO en main.js).
 (function () {
   const CHANGELOG = [
+    { v: 'v30.2', cambios: [
+      'Arreglada la iluminación de los niveles claros (poolrooms, nieve, hospitales…): un resplandor desbocado los dejaba en blanco puro y no se veía nada. El brillo vuelve a ser el de diseño: solo relucen los fluorescentes, los boquetes y el rótulo EXIT.',
+      'Los niveles muy blancos ahora ajustan solos su luz y exposición: siguen siendo cegadores de tema, pero se ve por dónde caminas.',
+    ] },
     { v: 'v30.1', cambios: [
       'Arreglado de raíz: la música del menú podía seguir sonando dentro de la partida (pasaba sobre todo si tu primer clic al cargar la página era directamente DESPERTAR).',
     ] },

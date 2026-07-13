@@ -29,6 +29,7 @@
   let composer = null;           // postprocesado (bloom + gamma); null => render directo
   let bloomPass = null;          // pase de bloom para el pulso dinámico por cordura baja
   let fogBase = 0.08;
+  let nivelClaro = 0;      // [0,1] cuánto se pasa de CLARA la paleta del nivel (v30.2)
   let glCanvas, overlay, octx, W, H;
   let levelKey = null;
   let staticGroup = null;        // suelo/muros/techo/salidas/props (reconstruible)
@@ -1113,14 +1114,22 @@
     if (window.Atmos3D) Atmos3D.buildLevel(world, staticGroup);
 
     const pal = world.level.paleta;
-    const fondo = new THREE.Color(pal.fondo);
+    const fondo = capFondo(new THREE.Color(pal.fondo));
     scene.background = fondo;
     fogBase = 0.08 + world.level.oscuridad * 0.16;
     scene.fog = new THREE.FogExp2(fondo, fogBase);
     const esLevel0 = world.level.id === 'level-0';
-    amb.intensity = esLevel0 ? 0.22 : Math.max(0.12, 0.55 - world.level.oscuridad * 0.4);
-    dlight.intensity = esLevel0 ? 0.14 : 0.35;
-    renderer.toneMappingExposure = esLevel0 ? 0.96 : 1.15;
+    // Paletas casi blancas (poolrooms, nieve, hospitales): la misma energía de
+    // luz que en un nivel normal SATURA el albedo claro y quema el centro de
+    // la imagen. nivelClaro ∈ [0,1] mide cuánto se pasa de claro el suelo y
+    // rebaja proporcionalmente ambiente y exposición (0 en niveles normales).
+    const cSuelo = new THREE.Color(pal.suelo);
+    const lumSuelo = 0.2126 * cSuelo.r + 0.7152 * cSuelo.g + 0.0722 * cSuelo.b;
+    nivelClaro = Math.max(0, Math.min(1, (lumSuelo - 0.55) / 0.35));
+    amb.intensity = esLevel0 ? 0.22
+      : Math.max(0.12, 0.55 - world.level.oscuridad * 0.4) * (1 - 0.35 * nivelClaro);
+    dlight.intensity = esLevel0 ? 0.14 : 0.35 * (1 - 0.3 * nivelClaro);
+    renderer.toneMappingExposure = esLevel0 ? 0.96 : 1.15 - 0.25 * nivelClaro;
     plight.color = new THREE.Color(pal.luz);
     plight.distance = (world.visionActual() + 3) * 1.6;
     plight.castShadow = !esLevel0;
@@ -1137,6 +1146,15 @@
     } else if (viejo) {
       disposeGrupo(viejo, true);
     }
+  }
+
+  // fondos casi blancos (poolrooms): la niebla acumulada contra un fondo de
+  // luminancia ~1 quemaba el horizonte a blanco puro — se capa la luminancia
+  // del color conservando su tono (solo muerde en fondos MUY claros) (v30.2)
+  function capFondo(c) {
+    const l = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+    if (l > 0.8) c.multiplyScalar(0.8 / l);
+    return c;
   }
 
   // termina de golpe un revelado a medias (llega otro ciclo de rebuild)
@@ -1533,7 +1551,7 @@
     // realimentaría sobre sí mismo y jamás se recuperaría al subir la cordura.
     const cordura = p.cordura ?? 100;
     if (scene.fog && !window.NOFX) {
-      const baseFondo = new THREE.Color(world.level.paleta.fondo);
+      const baseFondo = capFondo(new THREE.Color(world.level.paleta.fondo));
       if (world.level.id === 'level-0') {
         baseFondo.setRGB(0.051 + 0.015 * fase0, 0.043 + 0.025 * fase0, 0.02 + 0.04 * fase0);
       }
@@ -1546,12 +1564,17 @@
       scene.fog.color.copy(baseFondo);
     }
     if (bloomPass && !window.NOFX) {
-      let targetBloom = 0.55, targetThreshold = 0.4;
+      // BASE 0.82 = el umbral de DISEÑO del constructor (v14: solo florecen
+      // los emisivos casi blancos — fluorescentes, boquetes, rótulo EXIT).
+      // La adaptación del PR #17 (v26.2) escribía aquí 0.4 cada frame — ese
+      // 0.4 era el RADIO del constructor, no el umbral — y desde entonces
+      // cualquier pared clara floraba: niveles enteros en blanco nuclear.
+      let targetBloom = 0.55, targetThreshold = 0.82;
       if (cordura < 40) {
         const sc = (40 - cordura) / 40;
         const pulso = Math.sin(t * 0.003) * 0.15 * sc;
         targetBloom = 0.55 + sc * 0.65 + pulso;
-        targetThreshold = 0.4 - sc * 0.22;
+        targetThreshold = 0.82 - sc * 0.3; // con locura baja hasta 0.52: brilla, no ciega
       }
       bloomPass.strength = targetBloom;
       bloomPass.threshold = targetThreshold;
@@ -1564,7 +1587,9 @@
         flicker = Math.random() < 0.35 ? 0.08 : 0.55; // parpadeo severo de locura
       } else if (Math.random() < 0.012) flicker = 0.72;
     }
-    const luzJugador = world.level.id === 'level-0' ? 0.72 : 1.7;
+    // en paletas casi blancas la luz del jugador quema un disco alrededor
+    // (albedo claro × 1.7 satura el ACES): se normaliza con nivelClaro
+    const luzJugador = world.level.id === 'level-0' ? 0.72 : 1.7 * (1 - 0.5 * nivelClaro);
     plight.intensity = plight.intensity * 0.85 + (luzJugador * flicker) * 0.15;
     plight.position.set(px, 1.6, pz);
     plight.distance = (world.visionActual() + 3) * (p.luz ? 2.4 : 1.6);
