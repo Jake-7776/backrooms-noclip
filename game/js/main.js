@@ -60,7 +60,7 @@
     if (changelogPanel && changelogPanel.style.display !== 'none') {
       ev.preventDefault();
       ev.stopPropagation();
-      if (window.world && world.ui && typeof world.ui.toggleChangelog === 'function') {
+      if (world.ui && typeof world.ui.toggleChangelog === 'function') {
         world.ui.toggleChangelog(false);
       } else {
         changelogPanel.style.display = 'none';
@@ -73,7 +73,7 @@
     if (codexPanel && codexPanel.style.display !== 'none') {
       ev.preventDefault();
       ev.stopPropagation();
-      if (window.world && world.ui && typeof world.ui.toggleCodex === 'function') {
+      if (world.ui && typeof world.ui.toggleCodex === 'function') {
         world.ui.toggleCodex(false);
       } else {
         codexPanel.style.display = 'none';
@@ -95,7 +95,7 @@
     }
 
     // 4. Abrir Códice en la pantalla de título si se pulsa C
-    if (ev.code === 'KeyC' && (!window.world || !world.level || world.over)) {
+    if (ev.code === 'KeyC' && (!world.level || world.over)) {
       const titleScreen = document.getElementById('screen-title');
       if (titleScreen && titleScreen.style.display !== 'none') {
         const sndMenu = document.getElementById('sound-menu');
@@ -106,7 +106,7 @@
         ) {
           ev.preventDefault();
           ev.stopPropagation();
-          if (window.world && world.ui && typeof world.ui.toggleCodex === 'function') {
+          if (world.ui && typeof world.ui.toggleCodex === 'function') {
             world.ui.toggleCodex(true);
           }
           return;
