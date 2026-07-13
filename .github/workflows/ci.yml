@@ -31,6 +31,9 @@ jobs:
       - name: Tests de perfiles locales
         run: node game/js/systems/game.test.js
 
+      - name: Tests de la Sala compartida (aforo y snapshots)
+        run: node game/js/sim/sala.test.js
+
       - name: Auditoría de Level 0 (100 semillas deterministas)
         run: node pipeline/level0-audit.js
 

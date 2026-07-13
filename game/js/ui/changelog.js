@@ -4,6 +4,9 @@
 // tanda de cambios (junto con VERSION_JUEGO en main.js).
 (function () {
   const CHANGELOG = [
+    { v: 'v30.8', cambios: [
+      'Las salas llenas van mucho más finas: las posiciones de los demás viajan a la mitad de ritmo (tu interpolación las suaviza igual), los errantes muy lejanos ni se dibujan, y cada instancia reparte antes a la gente (aforo 60 → 50). La simulación del servidor sigue exacta. (josealmon)',
+    ] },
     { v: 'v30.7', cambios: [
       'El giro de cámara con el ratón (Pointer Lock) responde 1:1, sin el retardo de goma de antes; y el suavizado del resto de movimientos de cámara ya no depende de tus FPS.',
       'Nuevo tick en Ajustes: «mostrar FPS en pantalla».',
