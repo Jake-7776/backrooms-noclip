@@ -235,6 +235,7 @@ class Sala {
   prepararCaminata(jug) {
     jug.pasosSala = 0;
     jug.distSala = 0;
+    jug._aireContaminadoAcum = 0;
     jug.caminataObjetivo = (this.map.caminatas || []).some(destinoDisponible)
       ? MapGen.walkingGoal(this.def, `${jug.token}::${this.clave}`, 1, 0)
       : 0;
@@ -291,6 +292,21 @@ class Sala {
         const n = Math.floor(jug._corduraAcum / cadCordura);
         jug._corduraAcum -= n * cadCordura;
         jug.cordura = Math.max(0, jug.cordura - n);
+      }
+    }
+    // La contaminación de Level 11 solo castiga la exposición prolongada:
+    // 1 punto por 48 tiles sin filtrar. El acumulador conserva la fracción
+    // pendiente, pero no avanza mientras exista protección respiratoria.
+    if (reglas.includes('aire_contaminado') && !mascara) {
+      jug._aireContaminadoAcum = (jug._aireContaminadoAcum || 0) + tiles;
+      if (jug._aireContaminadoAcum >= 48) {
+        const n = Math.floor(jug._aireContaminadoAcum / 48);
+        jug._aireContaminadoAcum -= n * 48;
+        this.herir(jug, n, 'el aire contaminado');
+        if (!jug.muerto) this.enviar(jug.ws, {
+          t: 'aviso',
+          txt: 'El smog te irrita los pulmones. Necesitas aire filtrado.',
+        });
       }
     }
     if (reglas.includes('frio') && !chaqueta) this.herir(jug, pasos, 'el frío');

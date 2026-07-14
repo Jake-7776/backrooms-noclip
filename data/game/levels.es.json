@@ -3001,9 +3001,11 @@
   },
   "vision": 8,
   "oscuridad": 0.25,
-  "descripcion": "Una ciudad interminable de hormigón, fachadas repetidas y calles que no recuerdan haber tenido final.",
+  "descripcion": "Una ciudad interminable de hormigón, fachadas repetidas y calles cubiertas por un smog cargado de contaminantes. Respirarlo durante demasiado tiempo termina pasando factura.",
   "cita": "Parece una ciudad. Eso no significa que entienda a los humanos.",
-  "reglas": [],
+  "reglas": [
+   "aire_contaminado"
+  ],
   "entidades": [
    {
     "id": "faceling",
