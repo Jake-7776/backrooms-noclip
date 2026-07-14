@@ -4,6 +4,10 @@
 // tanda de cambios (junto con VERSION_JUEGO en main.js).
 (function () {
   const CHANGELOG = [
+    { v: 'v30.9', cambios: [
+      'Las salas concurridas van mucho más fluidas: los demás errantes se mueven suaves aunque haya decenas en pantalla, y ya no dan un salto brusco al reanudar la marcha tras estar quietos.',
+      'En una multitud, los nombres y bocadillos de chat priorizan a los más cercanos en vez de apilarse ilegibles.',
+    ] },
     { v: 'v30.7', cambios: [
       'El giro de cámara con el ratón (Pointer Lock) responde 1:1, sin el retardo de goma de antes; y el suavizado del resto de movimientos de cámara ya no depende de tus FPS.',
       'Nuevo tick en Ajustes: «mostrar FPS en pantalla».',
