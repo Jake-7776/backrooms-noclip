@@ -32,12 +32,16 @@
    "alucinaciones"
   ],
   "entidades": [],
+  "contenedores": [
+   10,
+   14
+  ],
   "objetos": [
    {
     "id": "agua_almendras",
     "n": [
-     1,
-     2
+     3,
+     4
     ]
    }
   ],
@@ -65,7 +69,15 @@
     "texto": "Una rara salida de emergencia que lleva a Level 14",
     "destino": "level-14",
     "tipo": "rara",
+    "ritual": "emergencia",
     "prob": 0.08
+   },
+   {
+    "texto": "Una sala tranquila y aislada, con un tenue patrón manila en las paredes y una única luz de tono anaranjado. Quedarse aquí demasiado tiempo difumina los sentidos… y a veces, es una salida.",
+    "destino": "*opciones:level-1,level-2",
+    "tipo": "rara",
+    "mecanica": "manila",
+    "permanenciaS": [180, 300]
    },
    {
     "texto": "Puertas correderas de cristal, como de invernadero, hacia Level 13",
@@ -376,24 +388,21 @@
   ],
   "salidas": [
    {
-    "texto": "Las madrigueras y agujeros del terreno descienden hacia niveles sin cartografiar",
-    "destino": null,
-    "tipo": "sellada"
-   },
-   {
     "texto": "Tropezar con una rama caída puede llevarte a Level 6.1",
-    "destino": null,
-    "tipo": "sellada"
+    "destino": "level-6-1",
+    "tipo": "normal"
    },
    {
     "texto": "Entrar en un agujero del terreno conduce a Level 8",
-    "destino": null,
-    "tipo": "sellada"
+    "destino": "level-8",
+    "tipo": "arriesgada",
+    "riesgoVoid": 0.1
    },
    {
     "texto": "Vagar lo suficiente, o seguir una luz anómala, lleva a Level 7",
-    "destino": null,
-    "tipo": "sellada"
+    "destino": "level-7",
+    "tipo": "normal",
+    "mecanica": "caminata"
    }
   ],
   "esEscape": false,
@@ -1290,19 +1299,21 @@
   ],
   "salidas": [
    {
-    "texto": "La sala de embarque conecta con otros niveles espaciales, aún sin cartografiar",
-    "destino": null,
-    "tipo": "sellada"
+    "texto": "Romper una ventana de la oficina te lanza al nivel mostrado al otro lado",
+    "destino": "*aleatoria",
+    "tipo": "arriesgada",
+    "riesgoVoid": 0.1
    },
    {
-    "texto": "Cualquier interacción letal con [ARCHIVO DAÑADO] lleva a los caídos a Level 203",
-    "destino": null,
-    "tipo": "sellada"
+    "texto": "Encontrar la sala de embarque y hacer no-clip por su puerta lleva a Level 24",
+    "destino": "level-24",
+    "tipo": "normal"
    },
    {
-    "texto": "La sala de embarque: hacer no-clip por su puerta lleva a Level 24",
-    "destino": null,
-    "tipo": "sellada"
+    "texto": "Interactuar con [ARCHIVO DAÑADO] puede terminar en Level 203",
+    "destino": "level-203",
+    "tipo": "arriesgada",
+    "riesgoVoid": 0.35
    }
   ],
   "esEscape": false,
@@ -1535,7 +1546,20 @@
     ]
    }
   ],
-  "salidas": [],
+  "salidas": [
+   {
+    "texto": "Volver por la ventana abierta por la que entraste, regresando a Level 1",
+    "destino": "level-1",
+    "tipo": "normal"
+   },
+   {
+    "texto": "Atravesar una de las otras ventanas abiertas hacia un destino incierto",
+    "destino": "*aleatoria",
+    "tipo": "arriesgada",
+    "riesgoVoid": 0.05,
+    "prob": 0.6
+   }
+  ],
   "esEscape": false,
   "url": "https://backrooms.fandom.com/wiki/Level_188",
   "estilo": {
@@ -1859,7 +1883,23 @@
     ]
    }
   ],
-  "salidas": [],
+  "salidas": [
+   {
+    "texto": "Un largo túnel de mármol bajo un puente lleva a Level 307",
+    "destino": "level-307",
+    "tipo": "normal"
+   },
+   {
+    "texto": "Alejarse hasta que la ciudad se vuelva monocroma anuncia Level 777",
+    "destino": "level-777",
+    "tipo": "rara"
+   },
+   {
+    "texto": "Seguir la ciudad desolada cuando el paisaje empieza a cambiar lleva a Level 11",
+    "destino": "level-11",
+    "tipo": "normal"
+   }
+  ],
   "esEscape": false,
   "url": "https://backrooms.fandom.com/wiki/Level_306",
   "estilo": {
@@ -1948,8 +1988,8 @@
   "peligro": 0,
   "bioma": "oficinas",
   "tam": [
-   44,
-   40
+   72,
+   64
   ],
   "paleta": {
    "suelo": "#2a1a30",
@@ -1958,8 +1998,8 @@
    "luz": "#ff88ff",
    "fondo": "#080410"
   },
-  "vision": 8,
-  "oscuridad": 0.3,
+  "vision": 7,
+  "oscuridad": 0.38,
   "descripcion": "El Natatorio de Neón: piscinas púrpuras interminables de estética futurista, máquinas expendedoras y calma. Uno de los pocos rincones amables de las Backrooms. El daño que sufre el nivel se cura solo.",
   "cita": "La Tierra Prometida, la llaman. Nadie quiere marcharse. Quizá ese sea el problema.",
   "reglas": [],
@@ -1994,7 +2034,29 @@
     ]
    }
   ],
-  "salidas": [],
+  "salidas": [
+   {
+    "texto": "Manipular ordenadores con Windows XP puede enviarte a Level 833",
+    "destino": "level-833",
+    "tipo": "rara"
+   },
+   {
+    "texto": "Beber agua verde turquesa brillante en la piscina lleva a Level 37",
+    "destino": "level-37",
+    "tipo": "normal"
+   },
+   {
+    "texto": "Hacer no-clip en ciertas posiciones te arroja al Vacío antes de caer en Level 995",
+    "destino": "level-995",
+    "tipo": "arriesgada",
+    "riesgoVoid": 0.15
+   },
+   {
+    "texto": "Cruzar una puerta con un dibujo de bola de bolos lleva a Level 499",
+    "destino": "level-499",
+    "tipo": "normal"
+   }
+  ],
   "esEscape": false,
   "url": "https://backrooms.fandom.com/wiki/Level_399",
   "estilo": {
@@ -2190,8 +2252,8 @@
   "peligro": 1,
   "bioma": "oficinas",
   "tam": [
-   44,
-   40
+   82,
+   72
   ],
   "paleta": {
    "suelo": "#d8d4cc",
@@ -2200,8 +2262,8 @@
    "luz": "#ffffff",
    "fondo": "#0c0c0a"
   },
-  "vision": 8,
-  "oscuridad": 0.2,
+  "vision": 6,
+  "oscuridad": 0.36,
   "descripcion": "Una casa blanca inmensa, eternamente en reformas: escaleras de mano, brochas y pintura fresca por todas partes. Cada año hay más habitaciones. El Hacedor nunca deja de construir, y nadie lo ha visto.",
   "cita": "En 2016 contamos 52 habitaciones. Hoy son 77. Nadie ha visto obreros.",
   "reglas": [
@@ -2224,7 +2286,13 @@
     ]
    }
   ],
-  "salidas": [],
+  "salidas": [
+   {
+    "texto": "Salir de The Whiteout por la misma puerta luminosa por la que entraste",
+    "destino": "level-483",
+    "tipo": "normal"
+   }
+  ],
   "esEscape": false,
   "url": "https://backrooms.fandom.com/wiki/Level_484",
   "estilo": {
@@ -2395,8 +2463,8 @@
   "peligro": 1,
   "bioma": "exterior",
   "tam": [
-   50,
-   50
+   90,
+   90
   ],
   "paleta": {
    "suelo": "#c8d4e0",
@@ -2405,8 +2473,8 @@
    "luz": "#fff8f0",
    "fondo": "#182028"
   },
-  "vision": 7,
-  "oscuridad": 0.3,
+  "vision": 6,
+  "oscuridad": 0.38,
   "descripcion": "Un paseo de linternas bajo la última nevada. El frío cala despacio y las farolas de papel parpadean con calidez extraña. Es tranquilo. Demasiado tranquilo para las Backrooms.",
   "cita": "Camina contigo mismo. Solamente.",
   "reglas": [
@@ -2429,7 +2497,14 @@
     ]
    }
   ],
-  "salidas": [],
+  "salidas": [
+   {
+    "texto": "Caer por un parche de nieve fuera del Lantern Walk transfiere a Level 910",
+    "destino": "level-910",
+    "tipo": "arriesgada",
+    "riesgoVoid": 0.1
+   }
+  ],
   "esEscape": false,
   "url": "https://backrooms.fandom.com/wiki/Level_909",
   "estilo": {
@@ -2498,7 +2573,57 @@
     ]
    }
   ],
-  "salidas": [],
+  "salidas": [
+   {
+    "texto": "Montaña rusa neutral: al llegar al final puedes aparecer en Level 0",
+    "destino": "level-0",
+    "tipo": "normal"
+   },
+   {
+    "texto": "Montaña rusa neutral: al llegar al final puedes aparecer en Level 1",
+    "destino": "level-1",
+    "tipo": "normal"
+   },
+   {
+    "texto": "Montaña rusa neutral: al llegar al final puedes aparecer en Level 2",
+    "destino": "level-2",
+    "tipo": "normal"
+   },
+   {
+    "texto": "Montaña rusa neutral: al llegar al final puedes aparecer en Level 27",
+    "destino": "level-27",
+    "tipo": "normal"
+   },
+   {
+    "texto": "Montaña rusa de karma negativo: el trazado colapsa hacia Level 6",
+    "destino": "level-6",
+    "tipo": "arriesgada",
+    "riesgoVoid": 0.15
+   },
+   {
+    "texto": "Montaña rusa de karma negativo: el trazado colapsa hacia Level 777",
+    "destino": "level-777",
+    "tipo": "arriesgada",
+    "riesgoVoid": 0.25
+   },
+   {
+    "texto": "Montaña rusa de karma negativo: el trazado colapsa hacia Level 626",
+    "destino": "level-626",
+    "tipo": "arriesgada",
+    "riesgoVoid": 0.2
+   },
+   {
+    "texto": "Montaña rusa de karma negativo: el trazado colapsa hacia Level 996",
+    "destino": "level-996",
+    "tipo": "arriesgada",
+    "riesgoVoid": 0.15
+   },
+   {
+    "texto": "Montaña rusa de karma positivo extremo: el recorrido termina en Level 399",
+    "destino": "level-399",
+    "tipo": "rara"
+   }
+  ],
   "esEscape": false,
   "url": "https://backrooms.fandom.com/wiki/Level_995",
   "estilo": {
@@ -2516,8 +2641,8 @@
   "peligro": 3,
   "bioma": "exterior",
   "tam": [
-   50,
-   50
+   100,
+   100
   ],
   "paleta": {
    "suelo": "#e8e8ea",
@@ -2526,8 +2651,8 @@
    "luz": "#ffffff",
    "fondo": "#a0a0a8"
   },
-  "vision": 9,
-  "oscuridad": 0.05,
+  "vision": 7,
+  "oscuridad": 0.08,
   "descripcion": "Blancura absoluta en dos mundos gemelos donde la gravedad apenas existe. Tus pertenencias desaparecen al entrar. Hay comida de sobra y nada más: la tortura aquí no es el hambre, es el silencio.",
   "cita": "Los que se quedan demasiado acaban convertidos en Insanity. Los que se van, casi.",
   "reglas": [
@@ -2658,5 +2783,671 @@
   },
   "particulas": "polvo",
   "sonido": "goteo_tuberias"
+ },
+ "level-6-1": {
+  "id": "level-6-1",
+  "wikiTitle": "Level 6.1",
+  "nombre": "Level 6.1: «Silva Subterraneus»",
+  "clase": "Peligro mental · Subnivel boscoso",
+  "peligro": 3,
+  "bioma": "bosque",
+  "tam": [
+   56,
+   56
+  ],
+  "paleta": {
+   "suelo": "#222018",
+   "pared": "#2f2b20",
+   "detalle": "#6f5f38",
+   "luz": "#b88a38",
+   "fondo": "#030302"
+  },
+  "vision": 5,
+  "oscuridad": 0.72,
+  "descripcion": "Un bosque subterráneo de raíces colgantes, árboles muertos, estatuas petrificadas y faroles aislados bajo la oscuridad de Level 6.",
+  "cita": "Las estatuas no caminan. Solo cambian cuando dejas de mirarlas.",
+  "reglas": [
+   "oscuridad_total",
+   "alucinaciones"
+  ],
+  "entidades": [
+   {
+    "id": "duller",
+    "n": [
+     1,
+     2
+    ],
+    "prob": 0.6
+   }
+  ],
+  "objetos": [
+   {
+    "id": "amuleto",
+    "n": [
+     0,
+     1
+    ]
+   }
+  ],
+  "salidas": [
+   {
+    "texto": "Una puerta oxidada devuelve directamente a Level 6",
+    "destino": "level-6",
+    "tipo": "normal"
+   }
+  ],
+  "esEscape": false,
+  "url": "https://backrooms.fandom.com/wiki/Level_6.1",
+  "estilo": {
+   "pared": "arbol",
+   "suelo": "tierra"
+  },
+  "particulas": "polvo",
+  "sonido": "oscuridad"
+ },
+ "level-7": {
+  "id": "level-7",
+  "wikiTitle": "Level 7",
+  "nombre": "Level 7: «Thalassophobia»",
+  "clase": "Peligroso · Océano oscuro",
+  "peligro": 4,
+  "bioma": "exterior",
+  "tam": [
+   70,
+   70
+  ],
+  "paleta": {
+   "suelo": "#0b1a24",
+   "pared": "#102838",
+   "detalle": "#31566a",
+   "luz": "#7fb0c8",
+   "fondo": "#010408"
+  },
+  "vision": 5,
+  "oscuridad": 0.7,
+  "descripcion": "Una extensión oceánica negra y fría donde casi todas las salidas yacen en las profundidades.",
+  "cita": "El agua no está vacía. Solo es demasiado profunda para verlo.",
+  "reglas": [
+   "frio",
+   "agua_traicionera"
+  ],
+  "entidades": [
+   {
+    "id": "smiler",
+    "n": [
+     1,
+     1
+    ],
+    "prob": 0.35
+   }
+  ],
+  "objetos": [
+   {
+    "id": "chaqueta",
+    "n": [
+     0,
+     1
+    ]
+   }
+  ],
+  "salidas": [
+   {
+    "texto": "Nadar kilómetros hacia las profundidades puede arrastrarte a Level 8",
+    "destino": "level-8",
+    "tipo": "arriesgada",
+    "riesgoVoid": 0.2
+   },
+   {
+    "texto": "Una transición imposible bajo el agua lleva a Level 13",
+    "destino": "level-13",
+    "tipo": "rara"
+   },
+   {
+    "texto": "Unas piscinas imposibles aparecen entre la presión del fondo: Level 37",
+    "destino": "level-37",
+    "tipo": "rara"
+   }
+  ],
+  "esEscape": false,
+  "url": "https://backrooms.fandom.com/wiki/Level_7",
+  "estilo": {
+   "pared": "roca",
+   "suelo": "agua"
+  },
+  "particulas": null,
+  "sonido": "silencio_sub"
+ },
+ "level-8": {
+  "id": "level-8",
+  "wikiTitle": "Level 8",
+  "nombre": "Level 8: «Cave System»",
+  "clase": "Clase 3 · Cuevas peligrosas",
+  "peligro": 3,
+  "bioma": "tuneles",
+  "tam": [
+   72,
+   60
+  ],
+  "paleta": {
+   "suelo": "#201814",
+   "pared": "#3a2d24",
+   "detalle": "#6a4a36",
+   "luz": "#d0a070",
+   "fondo": "#050302"
+  },
+  "vision": 5,
+  "oscuridad": 0.68,
+  "descripcion": "Un sistema de cuevas oscuras, estrechas e inestables donde las rutas de escape son poco fiables.",
+  "cita": "La salida existe. El problema es que la cueva decide cuándo.",
+  "reglas": [
+   "oscuridad_total"
+  ],
+  "entidades": [
+   {
+    "id": "deathmoth",
+    "n": [
+     1,
+     3
+    ],
+    "prob": 0.75
+   },
+   {
+    "id": "hound",
+    "n": [
+     1,
+     1
+    ],
+    "prob": 0.35
+   }
+  ],
+  "objetos": [
+   {
+    "id": "agua_almendras",
+    "n": [
+     0,
+     1
+    ]
+   }
+  ],
+  "salidas": [
+   {
+    "texto": "Un túnel estrecho o un agujero vertical puede desembocar en otro nivel",
+    "destino": "*aleatoria",
+    "tipo": "arriesgada",
+    "riesgoVoid": 0.2
+   }
+  ],
+  "esEscape": false,
+  "url": "https://backrooms.fandom.com/wiki/Level_8",
+  "estilo": {
+   "pared": "roca",
+   "suelo": "tierra"
+  },
+  "particulas": "polvo",
+  "sonido": "goteo_tuberias"
+ },
+ "level-11": {
+  "id": "level-11",
+  "wikiTitle": "Level 11",
+  "nombre": "Level 11: «Concrete Jungle»",
+  "clase": "Urbano · Habitable",
+  "peligro": 1,
+  "bioma": "ciudad",
+  "tam": [
+   68,
+   58
+  ],
+  "paleta": {
+   "suelo": "#5c5c58",
+   "pared": "#8a8a82",
+   "detalle": "#353535",
+   "luz": "#f0e6c8",
+   "fondo": "#121212"
+  },
+  "vision": 8,
+  "oscuridad": 0.25,
+  "descripcion": "Una ciudad interminable de hormigón, fachadas repetidas y calles cubiertas por un smog cargado de contaminantes. Respirarlo durante demasiado tiempo termina pasando factura.",
+  "cita": "Parece una ciudad. Eso no significa que entienda a los humanos.",
+  "reglas": [
+   "aire_contaminado"
+  ],
+  "entidades": [
+   {
+    "id": "faceling",
+    "n": [
+     1,
+     3
+    ],
+    "prob": 0.7
+   }
+  ],
+  "objetos": [
+   {
+    "id": "agua_almendras",
+    "n": [
+     1,
+     2
+    ]
+   }
+  ],
+  "salidas": [
+   {
+    "texto": "Una pared púrpura inestable permite no-clip hacia Level 399",
+    "destino": "level-399",
+    "tipo": "rara"
+   }
+  ],
+  "esEscape": false,
+  "url": "https://backrooms.fandom.com/wiki/Level_11",
+  "estilo": {
+   "pared": "hormigon",
+   "suelo": "adoquin"
+  },
+  "particulas": null,
+  "sonido": "hum_suave"
+ },
+ "level-24": {
+  "id": "level-24",
+  "wikiTitle": "Level 24",
+  "nombre": "Level 24: «Extraterrestre»",
+  "clase": "Clase 5e · Ambiental",
+  "peligro": 5,
+  "bioma": "exterior",
+  "tam": [
+   64,
+   64
+  ],
+  "paleta": {
+   "suelo": "#2a2438",
+   "pared": "#4a3f64",
+   "detalle": "#9a76d0",
+   "luz": "#d6c4ff",
+   "fondo": "#05030a"
+  },
+  "vision": 7,
+  "oscuridad": 0.5,
+  "descripcion": "Un paisaje extraterrestre bajo cielos imposibles, atravesado por fallos, vacío y fenómenos espaciales.",
+  "cita": "No es un planeta. Es la idea de uno, estirada hasta romperse.",
+  "reglas": [
+   "gravedad_baja"
+  ],
+  "entidades": [
+   {
+    "id": "smiler",
+    "n": [
+     1,
+     1
+    ],
+    "prob": 0.35
+   }
+  ],
+  "objetos": [
+   {
+    "id": "amuleto",
+    "n": [
+     0,
+     1
+    ]
+   }
+  ],
+  "salidas": [
+   {
+    "texto": "Hacer no-clip en secciones glitchadas puede llevar a Level 15",
+    "destino": "level-15",
+    "tipo": "rara"
+   },
+   {
+    "texto": "Una no-colisión aleatoria te arranca del paisaje extraterrestre",
+    "destino": "*aleatoria",
+    "tipo": "arriesgada",
+    "riesgoVoid": 0.25
+   }
+  ],
+  "esEscape": false,
+  "url": "https://backrooms.fandom.com/wiki/Level_24",
+  "estilo": {
+   "pared": "roca",
+   "suelo": "tierra"
+  },
+  "particulas": null,
+  "sonido": "silencio_sub"
+ },
+ "level-37": {
+  "id": "level-37",
+  "wikiTitle": "Level 37",
+  "nombre": "Level 37: «Sublimity»",
+  "clase": "Seguro · Poolrooms",
+  "peligro": 1,
+  "bioma": "invernadero",
+  "tam": [
+   60,
+   52
+  ],
+  "paleta": {
+   "suelo": "#c8e8e8",
+   "pared": "#a6d6d6",
+   "detalle": "#5c8f90",
+   "luz": "#f8ffff",
+   "fondo": "#dff6f6"
+  },
+  "vision": 9,
+  "oscuridad": 0.08,
+  "descripcion": "Piscinas azules y pasillos húmedos que parecen limpios, tranquilos y demasiado perfectos.",
+  "cita": "El eco del agua siempre suena un poco más cerca de lo que debería.",
+  "reglas": [],
+  "entidades": [],
+  "objetos": [
+   {
+    "id": "agua_almendras",
+    "n": [
+     1,
+     2
+    ]
+   }
+  ],
+  "salidas": [
+   {
+    "texto": "Una piscina demasiado profunda puede hundirte hacia Level 7",
+    "destino": "level-7",
+    "tipo": "arriesgada",
+    "riesgoVoid": 0.1
+   }
+  ],
+  "esEscape": false,
+  "url": "https://backrooms.fandom.com/wiki/Level_37",
+  "estilo": {
+   "pared": "azulejo",
+   "suelo": "baldosa"
+  },
+  "particulas": null,
+  "sonido": "invernadero"
+ },
+ "level-203": {
+  "id": "level-203",
+  "wikiTitle": "Level 203",
+  "nombre": "Level 203",
+  "clase": "Indeterminado · Archivo dañado",
+  "peligro": 4,
+  "bioma": "oficinas",
+  "tam": [
+   66,
+   58
+  ],
+  "paleta": {
+   "suelo": "#282828",
+   "pared": "#444044",
+   "detalle": "#a03030",
+   "luz": "#e0d0c0",
+   "fondo": "#050505"
+  },
+  "vision": 5,
+  "oscuridad": 0.65,
+  "descripcion": "Un destino asociado a interacciones letales con [ARCHIVO DAÑADO]. La información llega incompleta.",
+  "cita": "[DATOS PERDIDOS]",
+  "reglas": [
+   "alucinaciones"
+  ],
+  "entidades": [
+   {
+    "id": "duller",
+    "n": [
+     1,
+     2
+    ],
+    "prob": 0.8
+   }
+  ],
+  "objetos": [
+   {
+    "id": "botiquin",
+    "n": [
+     0,
+     1
+    ]
+   }
+  ],
+  "salidas": [
+   {
+    "texto": "Un pasillo corrupto se recompone hacia Level 140",
+    "destino": "level-140",
+    "tipo": "rara"
+   }
+  ],
+  "esEscape": false,
+  "url": "https://backrooms.fandom.com/wiki/Level_203",
+  "estilo": {
+   "pared": "hormigon",
+   "suelo": "hormigon"
+  },
+  "particulas": "polvo",
+  "sonido": "susurros"
+ },
+ "level-307": {
+  "id": "level-307",
+  "wikiTitle": "Level 307",
+  "nombre": "Level 307",
+  "clase": "Transición · Mármol",
+  "peligro": 2,
+  "bioma": "oficinas",
+  "tam": [
+   66,
+   58
+  ],
+  "paleta": {
+   "suelo": "#d8d4ca",
+   "pared": "#b8b2a8",
+   "detalle": "#706860",
+   "luz": "#fff4d8",
+   "fondo": "#090807"
+  },
+  "vision": 7,
+  "oscuridad": 0.3,
+  "descripcion": "Un espacio de mármol al que se accede por túneles que aparecen bajo puentes de Level 306.",
+  "cita": "El mármol no guarda pisadas, pero sí recuerda direcciones.",
+  "reglas": [],
+  "entidades": [],
+  "objetos": [
+   {
+    "id": "agua_almendras",
+    "n": [
+     0,
+     1
+    ]
+   }
+  ],
+  "salidas": [
+   {
+    "texto": "El túnel de mármol vuelve a abrirse hacia Level 306",
+    "destino": "level-306",
+    "tipo": "normal"
+   }
+  ],
+  "esEscape": false,
+  "url": "https://backrooms.fandom.com/wiki/Level_307",
+  "estilo": {
+   "pared": "hormigon",
+   "suelo": "baldosa"
+  },
+  "particulas": null,
+  "sonido": "hum_suave"
+ },
+ "level-499": {
+  "id": "level-499",
+  "wikiTitle": "Level 499",
+  "nombre": "Level 499",
+  "clase": "Anómalo · Bolera",
+  "peligro": 2,
+  "bioma": "oficinas",
+  "tam": [
+   72,
+   58
+  ],
+  "paleta": {
+   "suelo": "#5c3a2e",
+   "pared": "#8c6a4a",
+   "detalle": "#e0b050",
+   "luz": "#ffd890",
+   "fondo": "#090604"
+  },
+  "vision": 7,
+  "oscuridad": 0.34,
+  "descripcion": "Una bolera interminable donde ciertas puertas y partidas perfectas conectan con Level 399.",
+  "cita": "Las pistas siempre esperan otro lanzamiento.",
+  "reglas": [],
+  "entidades": [
+   {
+    "id": "faceling",
+    "n": [
+     0,
+     2
+    ],
+    "prob": 0.5
+   }
+  ],
+  "objetos": [
+   {
+    "id": "agua_almendras",
+    "n": [
+     1,
+     1
+    ]
+   }
+  ],
+  "salidas": [
+   {
+    "texto": "Una puerta marcada con una bola de bolos devuelve a Level 399",
+    "destino": "level-399",
+    "tipo": "normal"
+   }
+  ],
+  "esEscape": false,
+  "url": "https://backrooms.fandom.com/wiki/Level_499",
+  "estilo": {
+   "pared": "madera",
+   "suelo": "tablones"
+  },
+  "particulas": null,
+  "sonido": "feria"
+ },
+ "level-833": {
+  "id": "level-833",
+  "wikiTitle": "Level 833",
+  "nombre": "Level 833",
+  "clase": "Anómalo · Sistemas antiguos",
+  "peligro": 2,
+  "bioma": "oficinas",
+  "tam": [
+   72,
+   60
+  ],
+  "paleta": {
+   "suelo": "#34404a",
+   "pared": "#607080",
+   "detalle": "#9ab0c0",
+   "luz": "#d8f0ff",
+   "fondo": "#05080a"
+  },
+  "vision": 7,
+  "oscuridad": 0.38,
+  "descripcion": "Un entorno conectado a ordenadores antiguos y sistemas operativos modernos fuera de lugar.",
+  "cita": "La pantalla azul no es un error. Es una puerta.",
+  "reglas": [
+   "alucinaciones"
+  ],
+  "entidades": [
+   {
+    "id": "faceling",
+    "n": [
+     0,
+     2
+    ],
+    "prob": 0.4
+   }
+  ],
+  "objetos": [
+   {
+    "id": "detector",
+    "n": [
+     0,
+     1
+    ]
+   }
+  ],
+  "salidas": [
+   {
+    "texto": "Experimentar con ordenadores antiguos puede devolver a Level 399",
+    "destino": "level-399",
+    "tipo": "rara"
+   }
+  ],
+  "esEscape": false,
+  "url": "https://backrooms.fandom.com/wiki/Level_833",
+  "estilo": {
+   "pared": "metal_futurista",
+   "suelo": "panel"
+  },
+  "particulas": null,
+  "sonido": "futurista"
+ },
+ "level-910": {
+  "id": "level-910",
+  "wikiTitle": "Level 910",
+  "nombre": "Level 910: «Thunderous Shallows»",
+  "clase": "Clase 5e · Ambiental extremo",
+  "peligro": 5,
+  "bioma": "exterior",
+  "tam": [
+   64,
+   64
+  ],
+  "paleta": {
+   "suelo": "#1b2930",
+   "pared": "#334850",
+   "detalle": "#8fd0ff",
+   "luz": "#e0f8ff",
+   "fondo": "#020609"
+  },
+  "vision": 6,
+  "oscuridad": 0.55,
+  "descripcion": "Aguas someras cargadas por tormentas constantes, relámpagos de colores y suelo inestable bajo la superficie.",
+  "cita": "Aquí el trueno no avisa. Juzga.",
+  "reglas": [
+   "agua_traicionera"
+  ],
+  "entidades": [
+   {
+    "id": "cell",
+    "n": [
+     1,
+     2
+    ],
+    "prob": 0.5
+   }
+  ],
+  "objetos": [
+   {
+    "id": "botas_reforzadas",
+    "n": [
+     0,
+     1
+    ]
+   }
+  ],
+  "salidas": [
+   {
+    "texto": "Dormir bajo la tormenta puede arrancarte hacia otro nivel",
+    "destino": "*aleatoria",
+    "tipo": "arriesgada",
+    "riesgoVoid": 0.25
+   }
+  ],
+  "esEscape": false,
+  "url": "https://backrooms.fandom.com/wiki/Level_910",
+  "estilo": {
+   "pared": "roca",
+   "suelo": "agua"
+  },
+  "particulas": "lluvia",
+  "sonido": "viento"
  }
 }

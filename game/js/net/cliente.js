@@ -22,6 +22,7 @@
   let rtt = 100;         // ms ida y vuelta (medido con ping/pong; telemetría)
   let pingTimer = null;
   let ultimoError = null; // último rechazo del servidor (lo muestra el título)
+  let salaActual = null;
   let pasoAcum = 0;       // distancia andada desde el último sonido de paso
   const r2 = (v) => Math.round(v * 100) / 100;
 
@@ -63,13 +64,30 @@
     if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
   }
 
-  function iniciar(nombre) {
+  function iniciar(nombre, sala) {
     const w = Game.world;
     const params = new URLSearchParams(location.search);
+    salaActual = sala || null;
+    ultimoError = null;
+    if (window.MODO_LOCAL) {
+      // MODO OFFLINE = servidor LOCAL (net/local.js): las mismas reglas del
+      // mundo corren en esta pestaña y este cliente ni se entera. Sin ping
+      // (rtt 0), sin reintentos, sin autoActualizar: no hay red que falle.
+      // (si venimos de un intento online fallido, sus reintentos mueren aquí)
+      clearTimeout(reintento);
+      clearInterval(pingTimer);
+      w.local = true;
+      rtt = 0;
+      // en local la puerta de desarrollo ?nivel= está siempre abierta (es tu
+      // propio mundo); online la decide el servidor con MMO_DEV=1
+      ws = Local.conectar(nombre, (m) => recibir(m, w), params.get('nivel') || undefined);
+      return;
+    }
     ws = new WebSocket(urlServidor());
     ws.onopen = () => enviar({
-      t: 'hola', nombre, token: token(), v: 7, // debe coincidir con protocolo.js
+      t: 'hola', nombre, token: token(), v: 8, // debe coincidir con protocolo.js
       nivel: params.get('nivel') || undefined, // puerta de desarrollo (solo MMO_DEV=1)
+      sala: salaActual || undefined,
     });
     ws.onmessage = (ev) => {
       let m;
@@ -86,9 +104,10 @@
         ultimoError = 'El juego se actualizó y tu navegador cargó una versión vieja. Pulsa Ctrl+F5.';
         return; // reintentar con el mismo código viejo no lleva a nada
       }
+      if (ev && ev.reason === 'sala') return;
       if (w.level) w.log('Conexión perdida con las Backrooms… reintentando.', 'danger');
       clearTimeout(reintento);
-      reintento = setTimeout(() => iniciar(nombre), 3000);
+      reintento = setTimeout(() => iniciar(nombre, salaActual), 3000);
     };
     ws.onerror = () => { ultimoError = ultimoError || 'No se pudo conectar con el servidor.'; };
     // medición de RTT: alimenta la reconciliación y el retardo de interpolación
@@ -222,6 +241,12 @@
         w.player.salud = m.valor;
         w.ui.updateHUD();
         break;
+      case 'estado':
+        w.player.salud = m.salud ?? w.player.salud;
+        w.player.sed = m.sed ?? w.player.sed;
+        w.player.cordura = m.cordura ?? w.player.cordura;
+        w.ui.updateHUD();
+        break;
       case 'inv':
         w.player.inv = m.inv;
         w.player.manos = m.manos;
@@ -245,6 +270,9 @@
           if (p && cerca(w, p[0], p[1], 12)) w.log(`${nombreDe(m.id)} cae al suelo…`, 'danger');
         }
         break;
+      case 'botinReset':
+        try { localStorage.removeItem('mmo-cajas::' + m.semilla); } catch (e) {}
+        break;
 
       // ---------- objetos y salidas ----------
       case 'dado': {
@@ -261,6 +289,17 @@
         break;
       }
       case 'canalFin': break;
+      case 'golpe': {
+        const p = posDe(m.id);
+        if (p) {
+          // Golpe a corta distancia (tubería, etc.)
+          if (window.Effects) {
+            Effects.flash(m.x, m.y, '#e8c95a');
+          }
+          if (window.Sfx && cerca(w, m.x, m.y, 12)) Sfx.play('golpe');
+        }
+        break;
+      }
       case 'abierto': {
         const ex = w.map.exits[m.i];
         if (!ex) return;
@@ -296,6 +335,11 @@
       case 'admin': // respuesta a la contraseña de guardián (Ajustes)
         w.esAdmin = !!m.si;
         if (window.onAdminCambia) window.onAdminCambia(w.esAdmin);
+        break;
+      case 'espectar': // v30: entras/sales del modo espectador (guardián)
+        w.espectador = m.si ? { objetivo: m.objetivo.id, nombre: m.objetivo.nombre } : null;
+        parar();
+        if (window.onEspectarCambia) window.onEspectarCambia(!!m.si, w.espectador);
         break;
 
       case 'caminata': {
@@ -384,6 +428,10 @@
       const hechas = new Set(JSON.parse(localStorage.getItem('mmo-cajas::' + m.semilla) || '[]'));
       for (const pr of w.map.props || [])
         if (pr.contenedor && hechas.has(pr.x + ',' + pr.y)) pr.registrado = true;
+      // ...y los objetos del suelo que ya recogiste: la semilla los regenera
+      // intactos y sin esto se podían re-farmear cruzando de sala ida y vuelta
+      for (const it of w.map.items || [])
+        if (hechas.has('suelo:' + it.x + ',' + it.y)) it.taken = true;
     } catch (e) {}
     w.entities = (m.ents || []).map((e) => ({
       uid: e.uid, id: e.id, def: w.data.entities[e.id],
@@ -395,13 +443,24 @@
     w.player.rx = m.x; w.player.ry = m.y;
     w.player.rot = m.rot ?? 2;
     w.player.salud = m.salud ?? 100;
+    w.player.sed = m.sed ?? 100;
+    w.player.cordura = m.cordura ?? 100;
     w.player.inv = m.inv || [];
     w.player.manos = m.manos || [null, null];
+    w.player.equipo = m.equipo || { cara: null, cuerpo: null, pies: null };
     w.pasosNivel = m.caminata ? m.caminata.pasos : 0;
     w._caminataObjetivo = m.caminata ? m.caminata.objetivo : 0;
     w._caminataAvisos = {};
     w.escondido = null;
     w._ignoraExit = null;
+    // v30: al seguir a tu objetivo a otra sala el 'nivel' trae espectador.
+    // v30.7: si sigues espectando, la barra se refresca IGUAL — cambia el
+    // objetivo (rotación global) o el nivel donde está, y ambos se muestran
+    const eraEspectador = !!w.espectador;
+    w.espectador = m.espectador
+      ? { objetivo: m.espectador.id, nombre: m.espectador.nombre } : null;
+    if (window.onEspectarCambia && (eraEspectador || w.espectador))
+      window.onEspectarCambia(!!w.espectador, w.espectador);
     // el códice local del navegador sigue coleccionando niveles transitados
     try { Game.Profiles.registrarEntrada(m.nivel); } catch (e) {}
     w.itemsVersion = (w.itemsVersion || 0) + 1;
@@ -424,7 +483,9 @@
     const g = w.map.grid;
     // FOV.compute indexa arrays por tile: SIEMPRE coordenadas enteras (v22:
     // la posición es flotante — un índice fraccionario se escribe en el vacío)
-    w.light = FOV.compute(g, Fisica.tileDe(w.player.x), Fisica.tileDe(w.player.y), w.visionActual());
+    // El espectador (v30) ve amplio: la cámara cenital necesita contexto
+    const radio = w.espectador ? Math.max(14, w.visionActual()) : w.visionActual();
+    w.light = FOV.compute(g, Fisica.tileDe(w.player.x), Fisica.tileDe(w.player.y), radio);
     for (let i = 0; i < w.light.length; i++) if (w.light[i] > 0) w.explored[i] = 1;
   }
 
@@ -451,9 +512,17 @@
   // Lo que ves es donde estás: sin reconciliación, sin saltos. El servidor
   // valida cada informe (velocidad/paredes/teleport) y solo responde 'mueve'
   // si es imposible — p. ej. un cliente trucado.
-  function frame(dt) {
-    const w = Game.world;
-    if (!listo) return;
+  function informarPosicion(w, forzar) {
+    const ahora = performance.now();
+    const dMov = Math.abs(w.player.x - repX) + Math.abs(w.player.y - repY);
+    const dRot = Math.abs(Fisica.normAng((w.player.rot || 0) - repRot));
+    if ((dMov > 0.03 || dRot > 0.05) && (forzar || ahora - repT > 60) && !w.escondido) {
+      repX = w.player.x; repY = w.player.y; repRot = w.player.rot || 0; repT = ahora;
+      enviar({ t: 'p', x: r2(repX), y: r2(repY), rot: r2(repRot), sec });
+    }
+  }
+
+  function integrarPaso(w, dt) {
     let idx = input.dx, idy = input.dy;
     if (modoMov) {
       if (mov.giro) {
@@ -464,13 +533,54 @@
     }
     if (!w.escondido && (idx || idy)) {
       const [nx, ny] = Fisica.mover(w.map.grid, w.player.x, w.player.y, idx, idy, dt, Fisica.VEL_JUGADOR);
-      // pasos: sonido 100% local, uno cada ~0.75 tiles recorridos
-      pasoAcum += Fisica.dist(w.player.x, w.player.y, nx, ny);
-      if (pasoAcum > 0.75) {
+      const distancia = Fisica.dist(w.player.x, w.player.y, nx, ny);
+      w.player.x = nx; w.player.y = ny;
+      return distancia;
+    }
+    return 0;
+  }
+
+  function frame(dt) {
+    const w = Game.world;
+    if (!listo) return;
+    // ---------- modo espectador (v30): la cámara ES el objetivo ----------
+    // ni input, ni informes, ni pasos: el jugador local se pega a la posición
+    // interpolada del objetivo y el FOV/render siguen la acción solos
+    if (w.espectador) {
+      const o = Otros.lista.find((x) => x.id === w.espectador.objetivo);
+      if (o) {
+        w.player.x = o.rx ?? o.x;
+        w.player.y = o.ry ?? o.y;
+      }
+      const tx = Fisica.tileDe(w.player.x), ty = Fisica.tileDe(w.player.y);
+      if (!tileFov || tileFov[0] !== tx || tileFov[1] !== ty) {
+        tileFov = [tx, ty];
+        fov(w);
+      }
+      return;
+    }
+    // Tras un microparón, conservar la trayectoria REAL (incluidas curvas junto
+    // a paredes) y reportarla en tramos cortos. El servidor acumula el presupuesto
+    // de velocidad de esos 0.6 s, pero mantiene el anti-teleport por informe.
+    const trocear = dt > 0.1;
+    let restante = dt;
+    let distancia = 0;
+    do {
+      const paso = Math.min(0.1, restante);
+      distancia += integrarPaso(w, paso);
+      if (trocear) informarPosicion(w, true);
+      restante -= paso;
+    } while (restante > 0.0001);
+    if (distancia) {
+      // pasos y botín conservan una sola evaluación por frame, aun si el
+      // movimiento tuvo que trocearse para informar el rastro al servidor
+      pasoAcum += distancia;
+      // umbral ~ media zancada real a VEL_JUGADOR (antes 0.75 daba ~6 pasos/s,
+      // sonaba a metralleta y no guardaba ritmo con el avance del personaje)
+      if (pasoAcum > 1.6) {
         pasoAcum = 0;
         if (window.Sfx) Sfx.play('paso', w.level?.estilo?.suelo);
       }
-      w.player.x = nx; w.player.y = ny;
       recogerSuelo(w); // botín del suelo: proximidad local
     }
     const tx = Fisica.tileDe(w.player.x), ty = Fisica.tileDe(w.player.y);
@@ -480,26 +590,38 @@
     }
     // informe de posición: al moverte/girar (mín. 60 ms entre informes) — los
     // tramos cortos mantienen legal el chequeo de paredes del servidor
-    const ahora = performance.now();
-    const dMov = Math.abs(w.player.x - repX) + Math.abs(w.player.y - repY);
-    const dRot = Math.abs(Fisica.normAng((w.player.rot || 0) - repRot));
-    if ((dMov > 0.03 || dRot > 0.05) && ahora - repT > 60 && !w.escondido) {
-      repX = w.player.x; repY = w.player.y; repRot = w.player.rot || 0; repT = ahora;
-      enviar({ t: 'p', x: r2(repX), y: r2(repY), rot: r2(repRot), sec });
-    }
+    if (!trocear) informarPosicion(w, false);
   }
 
   // ---------- botín INDIVIDUAL (v25): cajas, dado y suelo en TU navegador ----------
-  const POOL_CAJAS = ['agua_almendras', 'agua_almendras', 'botiquin', 'amuleto', 'linterna',
-    'chaqueta', 'mascara_gas', 'botas_reforzadas', 'tuberia', 'fuego_griego', 'guante_paralisis', 'trebol'];
+  function poolCajas(w) {
+    const basicos = ['agua_almendras', 'agua_almendras', 'botiquin', 'linterna', 'tuberia', 'trebol'];
+    return basicos.concat(Object.keys(w.data.objects).filter((id) => !basicos.includes(id)));
+  }
 
-  function guardarCaja(w, pr) {
+  // persiste el botín ya resuelto de esta sala: cajas ('x,y') y suelo ('suelo:x,y')
+  function guardarLoot(w, clave) {
     try {
       const k = 'mmo-cajas::' + (w._semillaSala || '');
       const lista = JSON.parse(localStorage.getItem(k) || '[]');
-      lista.push(pr.x + ',' + pr.y);
+      lista.push(clave);
       localStorage.setItem(k, JSON.stringify(lista.slice(-400)));
     } catch (e) {}
+  }
+
+  // El alta de botín tiene cadencia en el server (sala.loot descarta EN
+  // SILENCIO a <1.2 s del anterior): los envíos se espacian aquí para que un
+  // objeto ya consumido en este lado no se pierda por llegar demasiado seguido.
+  // 1.3 s da margen al jitter de red; lootPend cuenta los aún no enviados
+  // (ocupan hueco de mochila mientras viajan).
+  let lootT = 0, lootPend = 0;
+  function enviarLoot(id) {
+    const cuando = Math.max(Date.now(), lootT + 1300);
+    lootT = cuando;
+    const espera = cuando - Date.now();
+    if (espera <= 0) { enviar({ t: 'loot', id }); return; }
+    lootPend++;
+    setTimeout(() => { lootPend--; enviar({ t: 'loot', id }); }, espera);
   }
 
   // ESPACIO sobre un contenedor sin registrar: TODO local (dado, botín,
@@ -509,18 +631,30 @@
       Fisica.dist(p.x, p.y, w.player.x, w.player.y) <= 1.2);
     if (!pr) return false;
     pr.registrado = true;
-    guardarCaja(w, pr);
+    guardarLoot(w, pr.x + ',' + pr.y);
     if (window.Sfx) Sfx.play('registrar');
     w.rollDice('Registras el contenedor…', (d) => {
-      if (d >= 14) {
-        const id = POOL_CAJAS[Math.min(POOL_CAJAS.length - 1,
-          Math.floor((d - 14) / 7 * POOL_CAJAS.length + Math.floor(Math.random() * 3)))];
-        if ((w.player.inv || []).length >= 6) {
+      if (w.level.id === 'level-0' && (d === 12 || d === 13)) {
+        const id = 'agua_almendras';
+        if ((w.player.inv || []).length + lootPend >= 6) {
+          w.log(`Dado: ${d}. Encuentras agua de almendras… pero no te cabe nada más.`, 'event');
+        } else {
+          w.log(`Dado: ${d}. Encuentras: ${w.data.objects[id].nombre}.`, 'good');
+          try { Game.Profiles.registrarDescubierto('objetos', id); } catch (e) {}
+          if (window.Effects) Effects.flash(w.player.x, w.player.y, '#ffe9a0');
+          enviarLoot(id);
+        }
+      } else if (d >= 14) {
+        const pool = poolCajas(w);
+        const id = pool[Math.min(pool.length - 1,
+          Math.floor((d - 14) / 7 * pool.length + Math.floor(Math.random() * 3)))];
+        if ((w.player.inv || []).length + lootPend >= 6) {
           w.log(`Dado: ${d}. Hay algo útil… pero no te cabe nada más.`, 'event');
         } else {
           w.log(`Dado: ${d}. Encuentras: ${w.data.objects[id].nombre}.`, 'good');
+          try { Game.Profiles.registrarDescubierto('objetos', id); } catch (e) {}
           if (window.Effects) Effects.flash(w.player.x, w.player.y, '#ffe9a0');
-          enviar({ t: 'loot', id }); // el server valida cadencia y hueco
+          enviarLoot(id); // el server revalida hueco al recibirlo
         }
       } else if (d >= 7) {
         w.log(`Dado: ${d}. Vacío. Solo polvo y papel amarillento.`, 'event');
@@ -543,14 +677,16 @@
       const d = Fisica.dist(it.x, it.y, w.player.x, w.player.y);
       if (it.recien) { if (d > 0.8) it.recien = false; continue; }
       if (d >= 0.5) continue;
-      if ((w.player.inv || []).length >= 6) continue; // sin hueco: se queda
+      if ((w.player.inv || []).length + lootPend >= 6) continue; // sin hueco: se queda
       it.taken = true;
+      guardarLoot(w, 'suelo:' + it.x + ',' + it.y); // que no reaparezca al re-entrar
       w.itemsVersion = (w.itemsVersion || 0) + 1;
       const def = w.data.objects[it.id];
       w.log(`Recoges: ${def ? def.nombre : it.id}.`, 'good');
+      try { Game.Profiles.registrarDescubierto('objetos', it.id); } catch (e) {}
       if (window.Sfx) Sfx.play('recoger');
-      enviar({ t: 'loot', id: it.id });
-      break; // uno por vez (la cadencia del server manda)
+      enviarLoot(it.id);
+      break; // uno por escaneo
     }
   }
 
@@ -569,7 +705,14 @@
   }
 
   function admin(clave) { enviar({ t: 'admin', clave }); }
+  function espectar(objetivo) {
+    // 'sig'/'ant' = rotar por TODOS los errantes del mundo (v30.7, lo resuelve
+    // el servidor); un número = observar a ese id; null = volver al mundo
+    if (objetivo === 'sig' || objetivo === 'ant') { enviar({ t: 'espectar', dir: objetivo }); return; }
+    enviar({ t: 'espectar', objetivo: objetivo ?? null });
+  }
   function tp(nivelId) { enviar({ t: 'chat', txt: '/tp ' + nivelId }); }
+  function give(itemId) { enviar({ t: 'chat', txt: '/give ' + itemId }); }
 
   // ---------- chat ----------
   function crearChatUI() {
@@ -620,7 +763,7 @@
 
   window.Net = {
     iniciar, setInput, setMov, setRot, parar, frame,
-    accion, usar, luzToggle, mochila, admin, tp,
+    accion, usar, luzToggle, mochila, admin, tp, give, espectar,
     abrirChat, chatAbierto,
     get activo() { return listo; },
     get id() { return miId; },

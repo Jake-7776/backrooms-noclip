@@ -11,6 +11,17 @@
   };
 
   function show(name) {
+    // salir de la pantalla de título apaga SIEMPRE su música, venga por donde
+    // venga el arranque (DESPERTAR, continuar, autostart…) — cinturón además
+    // del stopMenu de conectarAlServidor, que las carreras del primer clic
+    // podían esquivar (v30.1)
+    if (name !== 'title' && window.Sfx) Sfx.stopMenu();
+    if (name !== 'end') document.body.classList.remove('smiler-death');
+    // el CSS de controles táctiles/aviso de orientación cuelga de estas
+    // clases en <body> (game-active, card-active) — sin esto #touch-controls
+    // se queda en display:none para siempre pese al media query pointer:coarse
+    document.body.classList.toggle('game-active', name === 'game');
+    document.body.classList.toggle('card-active', name === 'card');
     // fundido cosmético; el swap de display es SÍNCRONO (el selftest lo exige)
     const fade = $('fade');
     if (fade && !window.NOFX) {
@@ -65,7 +76,7 @@
   $('btn-log-close').onclick = () => toggleLog(false);
   if (window.Icons) Icons.set($('btn-log'), 'pergamino', 15);
 
-  // ---------- HUD (v15: limpio y contextual — manos + mochila, sin barras) ----------
+  // ---------- HUD (v15+: limpio y contextual — manos, equipo y mochila) ----------
   const ICONOS_INV = {
     agua_almendras: 'refresco', botiquin: 'botiquin', linterna: 'linterna',
     chaqueta: 'chaqueta', amuleto: 'cuadro', llave_nivel: 'llave',
@@ -74,14 +85,28 @@
     mascara_gas: 'mascara', botas_reforzadas: 'bota',
   };
 
+  function spriteObjeto(id, tam) {
+    if (!window.Sprites || !Sprites.tiene(id)) return null;
+    const spr = Sprites.get(id, 0);
+    if (!spr) return null;
+    const c = document.createElement('canvas');
+    c.width = tam; c.height = tam;
+    c.className = 'icono';
+    c.style.width = tam + 'px';
+    c.style.height = tam + 'px';
+    c.style.imageRendering = 'pixelated';
+    c.getContext('2d').drawImage(spr, 0, 0, tam, tam);
+    return c;
+  }
+
   function updateHUD() {
     if (!world.player || !world.level) return;
     renderManos();
+    renderEquipo();
     renderMoodles();
     renderDebugStats();
     if ($('backpack-panel').style.display !== 'none') {
       renderBackpack();
-      renderEquipo();
       renderEfectos();
     }
   }
@@ -93,15 +118,34 @@
     ['dbg-bebida', (p) => p.sed, '#4a7fbf'],
     ['dbg-cordura', (p) => p.cordura, '#9a6fc9'],
   ];
+  // clic en la barra: fija el valor directamente (streamer probando escenarios)
+  function fijarDebugStat(id, pct) {
+    if (id === 'dbg-salud') world.player.salud = pct;
+    else if (id === 'dbg-comida') world.player.hambre = pct;
+    else if (id === 'dbg-bebida') world.player.sed = pct;
+    else if (id === 'dbg-cordura') world.sanity(pct - world.player.cordura);
+    updateHUD();
+  }
   function renderDebugStats() {
     const cont = $('debug-stats');
     if (!cont || cont.style.display === 'none' || !world.esAdmin) return;
+    cont.style.pointerEvents = 'auto'; // el CSS del panel lo desactiva por defecto
     for (const [id, get, color] of DBG_BARRAS) {
       const v = Math.max(0, Math.min(100, Math.round(get(world.player) ?? 0)));
       const fill = $(id);
       fill.style.width = v + '%';
       fill.style.background = color;
       $(id + '-v').textContent = v;
+      const track = fill.parentElement;
+      if (track && !track._clickBound) {
+        track._clickBound = true;
+        track.style.cursor = 'pointer';
+        track.addEventListener('click', (ev) => {
+          const rect = track.getBoundingClientRect();
+          const pct = Math.max(0, Math.min(100, Math.round(((ev.clientX - rect.left) / rect.width) * 100)));
+          fijarDebugStat(id, pct);
+        });
+      }
     }
   }
 
@@ -109,7 +153,7 @@
   // aparecen solo cuando el estado empeora; 3 niveles de gravedad por color
   const MOODLES = [
     ['corazon', 'Salud', (p) => p.salud, [60, 35, 15], ['Herido', 'Malherido', 'Crítico'],
-      'Un botiquín (o el instinto Sangre amarilla) la recupera.'],
+      'Un botiquín la recupera.'],
     ['yin', 'Cordura', (p) => p.cordura, [50, 35, 15], ['Inquieto', 'Alterado', 'Mente al límite'],
       'Descansa en niveles seguros, bebe agua de almendras o usa un recuerdo del hogar. A 0, te pierdes para siempre.'],
     ['gota', 'Sed', (p) => p.sed, [50, 30, 10], ['Sediento', 'Muy sediento', 'Deshidratado'],
@@ -120,15 +164,6 @@
   function renderMoodles() {
     const cont = $('moodles');
     cont.innerHTML = '';
-    // Sintonía (v18): el ojo amarillo — siempre visible en cuanto despierta
-    const sint = world.player.sintonia || 0;
-    if (sint >= 10) {
-      const d = document.createElement('div');
-      d.className = 'moodle moodle-sint tip-left';
-      d.dataset.tip = `Sintonía ${sint}/100 — las Backrooms te reclaman. Las entidades corrientes te ignoran más… pero al ESCAPAR la realidad tira un dado contra tu Sintonía. El recuerdo del hogar la baja.`;
-      if (window.Icons) d.appendChild(Icons.img('ojo', 20));
-      cont.appendChild(d);
-    }
     for (const [icono, etiqueta, get, umbrales, nombres, consejo] of MOODLES) {
       const v = get(world.player);
       let lvl = 0;
@@ -149,10 +184,17 @@
     el.innerHTML = '';
     el.classList.remove('activa', 'vacia');
     if (!enPanel) {
-      const k = document.createElement('span');
-      k.className = 'k-mano';
-      k.textContent = m === 0 ? 'Q' : 'E';
-      el.appendChild(k);
+      // v28 — atajo dibujado según el dispositivo activo (Q/E, LB/L1…)
+      if (window.Controllers) {
+        const gl = Controllers.handGlyph(m, 13);
+        gl.className = 'k-mano';
+        el.appendChild(gl);
+      } else {
+        const k = document.createElement('span');
+        k.className = 'k-mano';
+        k.textContent = m === 0 ? 'Q' : 'E';
+        el.appendChild(k);
+      }
     }
     if (window.Icons) {
       const hand = Icons.img('mano', tam, m === 1);
@@ -161,19 +203,21 @@
       el.appendChild(hand);
     }
     const id = manos[m];
-    const accion = enPanel ? 'clic: guardar en la mochila' : `clic o ${m === 0 ? 'Q' : 'E'}: usar`;
+    const atajoTxt = window.Controllers ? Controllers.handKeyText(m) : (m === 0 ? 'Q' : 'E');
+    const accion = enPanel ? 'clic: guardar en la mochila' : `clic o ${atajoTxt}: usar`;
     if (id === '=') { el.title = `Ocupada por el objeto a dos manos (${enPanel ? 'clic: guardar' : 'clic o Q: usar'})`; return; }
     if (id) {
       const def = world.data.objects[id];
-      if (window.Icons) {
-        const itTam = Math.round(tam * 0.75);
-        const it = Icons.img(ICONOS_INV[id] || 'interrogante', itTam);
+      const itTam = Math.round(tam * 0.75);
+      const it = spriteObjeto(id, itTam) ||
+        (window.Icons ? Icons.img(ICONOS_INV[id] || 'interrogante', itTam) : null);
+      if (it) {
         it.classList.add('mano-item');
         it.style.marginLeft = (-itTam / 2) + 'px';
         el.appendChild(it);
       }
       el.title = `${def.nombre} (${accion})`;
-      if (id === 'linterna' && world.player.luz) el.classList.add('activa');
+      if (def.efecto?.toggle === 'luz' && world.player.luz) el.classList.add('activa');
     } else {
       el.classList.add('vacia');
       el.title = (m === 0 ? 'Mano izquierda' : 'Mano derecha') + ' (vacía)';
@@ -185,6 +229,42 @@
       pintarMano($('mano-' + m), m, 30, false);
       const bp = $('bp-mano-' + m);
       if (bp) pintarMano(bp, m, 40, true);
+      // v28 — etiqueta de atajo en la mochila según el dispositivo activo
+      const bpKey = $('bp-key-' + m);
+      if (bpKey) bpKey.textContent = window.Controllers ? Controllers.handKeyText(m) : (m === 0 ? 'tecla Q' : 'tecla E');
+    }
+  }
+
+  function highlightSlots(active, itemId) {
+    for (const id of [
+      'bp-mano-0', 'bp-mano-1', 'mano-0', 'mano-1',
+      'eq-cara', 'eq-cuerpo', 'eq-pies',
+      'hud-eq-cara', 'hud-eq-cuerpo', 'hud-eq-pies',
+    ]) {
+      const el = $(id);
+      if (el) el.classList.remove('slot-highlight-valid');
+    }
+    if (!active || !itemId) return;
+    const def = world.data.objects[itemId];
+    if (!def) return;
+    if (def.equipo) {
+      for (const id of ['eq-' + def.equipo, 'hud-eq-' + def.equipo]) {
+        const el = $(id);
+        if (el) el.classList.add('slot-highlight-valid');
+      }
+    } else {
+      for (const id of ['bp-mano-0', 'bp-mano-1', 'mano-0', 'mano-1']) {
+        const el = $(id);
+        if (el) el.classList.add('slot-highlight-valid');
+      }
+    }
+  }
+
+  function highlightBackpackGrid(active) {
+    const el = $('backpack-slots');
+    if (el) {
+      if (active) el.classList.add('slot-highlight-valid');
+      else el.classList.remove('slot-highlight-valid');
     }
   }
 
@@ -208,7 +288,16 @@
         slot.appendChild(nom);
         slot.title = `${def.nombre} — ${def.descripcion}`;
         slot.draggable = true;
-        slot.addEventListener('dragstart', (e) => e.dataTransfer.setData('text/plain', String(i)));
+        slot.addEventListener('dragstart', (e) => {
+          e.stopPropagation();
+          e.dataTransfer.setData('text/plain', String(i));
+          setTimeout(() => {
+            highlightSlots(true, id);
+          }, 0);
+        });
+        slot.addEventListener('dragend', () => {
+          highlightSlots(false);
+        });
         slot.onclick = () => showItemInfo(i, ic);
       }
       cont.appendChild(slot);
@@ -216,24 +305,30 @@
   }
 
   // ---------- equipamiento vestible (v20): cara / cuerpo / pies ----------
+  function pintarRanuraEquipo(el, tipo, objetoId, enHud) {
+    if (!el) return;
+    el.innerHTML = '';
+    el.classList.toggle('puesto', !!objetoId);
+    if (objetoId) {
+      const def = world.data.objects[objetoId];
+      if (window.Icons) el.appendChild(Icons.img(ICONOS_INV[objetoId] || 'interrogante', 26));
+      el.title = enHud ? `${def.nombre} (${tipo})` : `${def.nombre} (clic: quitártelo)`;
+    } else {
+      const ph = document.createElement('span');
+      ph.className = 'eq-ph';
+      ph.textContent = tipo;
+      el.appendChild(ph);
+      el.title = enHud
+        ? `${tipo}: no llevas nada`
+        : `Ranura de ${tipo} (arrastra aquí una prenda)`;
+    }
+  }
   function renderEquipo() {
     const eq = world.player.equipo || {};
     for (const tipo of ['cara', 'cuerpo', 'pies']) {
-      const el = $('eq-' + tipo);
-      if (!el) continue;
-      el.innerHTML = '';
-      el.classList.toggle('puesto', !!eq[tipo]);
-      if (eq[tipo]) {
-        const def = world.data.objects[eq[tipo]];
-        if (window.Icons) el.appendChild(Icons.img(ICONOS_INV[eq[tipo]] || 'interrogante', 26));
-        el.title = `${def.nombre} (clic: quitártelo)`;
-      } else {
-        const ph = document.createElement('span');
-        ph.className = 'eq-ph';
-        ph.textContent = tipo;
-        el.appendChild(ph);
-        el.title = `Ranura de ${tipo} (arrastra aquí una prenda)`;
-      }
+      const id = eq[tipo];
+      pintarRanuraEquipo($('eq-' + tipo), tipo, id, false);
+      pintarRanuraEquipo($('hud-eq-' + tipo), tipo, id, true);
     }
   }
 
@@ -251,17 +346,12 @@
       s.dataset.tip = tip;
       cont.appendChild(s);
     };
-    // instintos (buffs de la Sintonía)
-    for (const id of p.instintos || []) {
-      const inst = Game.INSTINTOS?.[id];
-      if (inst) chip(inst.icono, inst.nombre, inst.desc, false);
-    }
     // pasivos por llevarlos encima / puestos
     const PASIVOS = {
       trebol: ['trebol', 'Suerte', '+2 a todas tus tiradas de dado.'],
       detector: ['antena', 'Detector', 'Entidades cercanas visibles en el mapa (M).'],
       chaqueta: ['chaqueta', 'Abrigo', 'PUESTA: el frío no te daña.'],
-      mascara_gas: ['mascara', 'Aire filtrado', 'PUESTA: desgaste mental ambiental a la mitad.'],
+      mascara_gas: ['mascara', 'Aire filtrado', 'PUESTA: bloquea el aire contaminado · desgaste mental ambiental a la mitad.'],
       botas_reforzadas: ['bota', 'Pisada firme', 'PUESTAS: inmune a charcos sirena · detección −1.'],
     };
     for (const [id, [icono, nombre, tip]] of Object.entries(PASIVOS)) {
@@ -274,7 +364,6 @@
     if (p.cordura < 50) chip('yin', 'Mente frágil', `Cordura ${p.cordura}/100. Descansa en niveles seguros o usa un recuerdo del hogar.`, true);
     if (p.sed < 50) chip('gota', 'Sed', `Sed ${p.sed}/100. Bebe agua de almendras.`, true);
     if (p.hambre < 50) chip('pan', 'Hambre', `Hambre ${p.hambre}/100. Encuentra comida.`, true);
-    if ((p.sintonia || 0) >= 20) chip('ojo', `Sintonía ${p.sintonia}`, 'Las Backrooms te reclaman: las entidades te ignoran más… pero escapar es más difícil.', true);
     for (const rid of world.level?.reglas || []) {
       const r = window.Rules?.get(rid);
       if (!r || !r.turno) continue; // solo las que actúan cada turno
@@ -286,6 +375,7 @@
   function backpackAbierta() { return $('backpack-panel').style.display !== 'none'; }
   function toggleBackpack(force) {
     const vis = force !== undefined ? force : !backpackAbierta();
+    if (vis && document.pointerLockElement) document.exitPointerLock();
     $('backpack-panel').style.display = vis ? 'flex' : 'none';
     if (vis) { renderBackpack(); renderManos(); renderEquipo(); renderEfectos(); }
     if (window.Sfx) Sfx.play('ui');
@@ -298,6 +388,17 @@
     }
   }
 
+  // feedback de «botón pulsado» en la mano del HUD al usarla (clic, tecla,
+  // mando o botón táctil — cualquier camino que llame a usarMano/Net.usar)
+  function pulsarMano(m) {
+    const el = $('mano-' + m);
+    if (!el) return;
+    el.classList.remove('pulsada');
+    void el.offsetWidth; // reinicia la animación si se repite rápido
+    el.classList.add('pulsada');
+    setTimeout(() => el.classList.remove('pulsada'), 180);
+  }
+
   // manos: en el HUD el clic USA (v19: como Q/E); en el panel de la mochila
   // el clic GUARDA. Soltar un objeto arrastrado equipa en ambos sitios, y
   // arrastrar una mano hasta la rejilla guarda el objeto en la mochila.
@@ -305,9 +406,22 @@
     for (const el of [$('mano-' + m), $('bp-mano-' + m)]) {
       if (!el) continue;
       const enPanel = el.id.startsWith('bp-');
-      el.onclick = () => (enPanel ? Game.desequipar(m) : Game.usarMano(m));
+      el.onclick = () => {
+        if (enPanel) return Game.desequipar(m);
+        pulsarMano(m);
+        return Game.usarMano(m);
+      };
       el.draggable = true;
-      el.addEventListener('dragstart', (e) => e.dataTransfer.setData('text/plain', 'mano:' + m));
+      el.addEventListener('dragstart', (e) => {
+        e.stopPropagation();
+        e.dataTransfer.setData('text/plain', 'mano:' + m);
+        setTimeout(() => {
+          highlightBackpackGrid(true);
+        }, 0);
+      });
+      el.addEventListener('dragend', () => {
+        highlightBackpackGrid(false);
+      });
       el.addEventListener('dragover', (e) => e.preventDefault());
       el.addEventListener('drop', (e) => {
         e.preventDefault();
@@ -331,7 +445,16 @@
     if (!el) continue;
     el.onclick = () => Game.quitarEquipo(tipo);
     el.draggable = true;
-    el.addEventListener('dragstart', (e) => e.dataTransfer.setData('text/plain', 'eq:' + tipo));
+    el.addEventListener('dragstart', (e) => {
+      e.stopPropagation();
+      e.dataTransfer.setData('text/plain', 'eq:' + tipo);
+      setTimeout(() => {
+        highlightBackpackGrid(true);
+      }, 0);
+    });
+    el.addEventListener('dragend', () => {
+      highlightBackpackGrid(false);
+    });
     el.addEventListener('dragover', (e) => e.preventDefault());
     el.addEventListener('drop', (e) => {
       e.preventDefault();
@@ -345,12 +468,26 @@
   function efectoLegible(def) {
     const e = def.efecto || {};
     const partes = [];
-    if (e.salud) partes.push(`Restaura ${e.salud} ♥ de salud`);
-    if (e.cordura) partes.push(`Restaura ${e.cordura} ☯ de cordura`);
-    if (e.sed) partes.push(`Sacia ${e.sed} 💧 de sed`);
+    if (e.salud) partes.push(e.salud > 0 ? `Restaura ${e.salud} ♥ de salud` : `Daña ${Math.abs(e.salud)} ♥`);
+    if (e.cordura) partes.push(e.cordura > 0 ? `Restaura ${e.cordura} de cordura` : `Reduce ${Math.abs(e.cordura)} de cordura`);
+    if (e.sed) partes.push(e.sed > 0 ? `Sacia ${e.sed} de sed` : `Aumenta la sed ${Math.abs(e.sed)}`);
+    if (e.ruido) partes.push(`Genera ruido ${e.ruido}`);
     if (e.toggle === 'luz') partes.push('Alterna la luz (+4 de visión; atrae Deathmoths)');
-    if (e.activo === 'fuego') partes.push('USO ÚNICO: quema (−30) y ahuyenta todo en radio 3');
-    if (e.activo === 'paralisis') partes.push('USO ÚNICO: paraliza 6 turnos a lo adyacente');
+    if (e.activo === 'fuego') partes.push(`USO: quema y ahuyenta en radio ${e.radio || 3}`);
+    if (e.activo === 'fuego_menor') partes.push(`USO: quema en radio ${e.radio || 1}`);
+    if (e.activo === 'toxina' || e.activo === 'gas') partes.push(`USO: nube peligrosa en radio ${e.radio || 2}`);
+    if (e.activo === 'paralisis') partes.push('USO REUTILIZABLE: paraliza lo adyacente');
+    if (e.activo === 'disparo') partes.push(`USO: disparo frontal, daño ${e.dano || 34}`);
+    if (e.activo === 'flash') partes.push(`USO: revela y aturde en radio ${e.radio || 4}`);
+    if (e.activo === 'ruido') partes.push(`USO: distracción sonora en radio ${e.radio || 9}`);
+    if (e.activo === 'repeler' || e.activo === 'sellar') partes.push(`USO: repele amenazas cercanas`);
+    if (e.activo === 'salida') partes.push('USO: intenta abrir una ruta de nivel');
+    if (e.activo === 'blink') partes.push('USO: desplazamiento espacial corto');
+    if (e.activo === 'claridad') partes.push('USO: aporta información del entorno');
+    if (e.activo === 'glitch') partes.push('USO: distorsiona señales y revela anomalías');
+    if (e.activo === 'celeridad') partes.push('USO: acelera reflejos');
+    if (e.activo === 'ocultar' || e.activo === 'refugio') partes.push('USO: cobertura temporal');
+    if (e.activo === 'riesgo') partes.push('USO PELIGROSO: reacción anómala');
     if (e.pasivo === 'arma') partes.push('PASIVO: muévete HACIA una entidad adyacente para golpearla');
     if (e.pasivo === 'abrigo') partes.push('PUESTA (cuerpo): anula el daño por frío');
     if (e.pasivo === 'aire') partes.push('PUESTA (cara): reduce a la mitad el desgaste mental ambiental');
@@ -358,6 +495,9 @@
     if (e.pasivo === 'detector') partes.push('PASIVO: entidades cercanas visibles en el minimapa');
     if (e.pasivo === 'suerte') partes.push('PASIVO: +2 a todas tus tiradas de dado');
     if (e.pasivo === 'llave') partes.push('Se gasta al abrir una puerta de acero en The Hub');
+    if (e.pasivo === 'proteccion_quimica') partes.push('PASIVO: protección frente a corrosión/toxinas');
+    if (e.pasivo === 'traje_hostil') partes.push('PUESTO: protección de entorno hostil');
+    if (e.pasivo === 'fuerza') partes.push('PASIVO: mejora acciones físicas y golpes');
     return partes.join(' · ') || 'Efecto desconocido.';
   }
 
@@ -369,7 +509,9 @@
     if (window.Sfx) Sfx.play('ui');
     const iconEl = $('item-icon');
     iconEl.textContent = '';
-    if (window.Icons && Icons.has(icono)) iconEl.appendChild(Icons.img(icono, 20));
+    const sprIcon = spriteObjeto(id, 28);
+    if (sprIcon) iconEl.appendChild(sprIcon);
+    else if (window.Icons && Icons.has(icono)) iconEl.appendChild(Icons.img(icono, 20));
     else iconEl.textContent = icono;
     $('item-name').textContent = def.nombre;
     $('item-desc').textContent = def.descripcion;
@@ -378,7 +520,7 @@
     if (def.url) { wiki.style.display = 'inline'; wiki.href = def.url; }
     else wiki.style.display = 'none';
     const usable = def.efecto && (def.efecto.salud || def.efecto.cordura || def.efecto.sed ||
-      def.efecto.toggle || def.efecto.activo);
+      def.efecto.ruido || def.efecto.toggle || def.efecto.activo);
     const btnUse = $('btn-item-use');
     btnUse.style.display = usable ? 'inline-block' : 'none';
     // usar CIERRA también la mochila: si no, world.busy sigue activo y la
@@ -449,10 +591,14 @@
   }
 
   // ---------- dado ----------
-  function showDice(texto, cb) {
+  function showDice(texto, cb, resultado) {
+    if (document.pointerLockElement) document.exitPointerLock();
+    // el resultado llega ya decidido por la lógica (determinista por semilla);
+    // si no llega (dado personal online), se tira aquí
+    const tirar = () => (Number.isInteger(resultado) ? resultado : 1 + Math.floor(Math.random() * 20));
     // la animación puede apagarse en Ajustes (v16): la tirada se resuelve igual
     if (window.OPTS && !window.OPTS.dado) {
-      setTimeout(() => cb(1 + Math.floor(Math.random() * 20)), 120);
+      setTimeout(() => cb(tirar()), 120);
       return;
     }
     const ov = $('dice-overlay'), face = $('dice-face');
@@ -461,10 +607,10 @@
     face.classList.add('rolling');
     let ticks = 0;
     const iv = setInterval(() => {
-      face.textContent = 1 + Math.floor(Math.random() * 20);
+      face.textContent = 1 + Math.floor(Math.random() * 20); // caras al vuelo: solo animación
       if (++ticks > 14) {
         clearInterval(iv);
-        const result = 1 + Math.floor(Math.random() * 20);
+        const result = tirar();
         face.textContent = result;
         face.classList.remove('rolling');
         setTimeout(() => { ov.style.display = 'none'; cb(result); }, 900);
@@ -475,6 +621,7 @@
   // ---------- modal de salida ----------
   let exitDefShown = null;
   function showExitModal(def) {
+    if (document.pointerLockElement) document.exitPointerLock();
     exitDefShown = def;
     world.busy = true;
     // colección: ver una salida la desbloquea en el códice (las de retorno no cuentan)
@@ -493,6 +640,8 @@
     else if (def.tipo === 'arriesgada' && def.riesgoVoid > 0)
       warn.textContent = `⚠ Camino inestable (riesgo de caer al Vacío) → ${destinoNombre ?? '???'}`;
     else warn.textContent = destinoNombre ? `→ ${destinoNombre}` : '→ ¿?';
+    // showLevelPicker oculta CRUZAR; si se eligió nivel (no «quedarse»), nadie lo restauraba
+    $('btn-cross').style.display = '';
     $('btn-cross').onclick = () => { hideExitModal(); Game.crossExit(def); };
     $('btn-stay').onclick = hideExitModal;
   }
@@ -503,6 +652,7 @@
 
   // ---------- selector de nivel (llave del Hub) ----------
   function showLevelPicker(ids, cb) {
+    if (document.pointerLockElement) document.exitPointerLock();
     world.busy = true;
     const modal = $('exit-modal');
     modal.style.display = 'flex';
@@ -526,38 +676,9 @@
     };
   }
 
-  // ---------- Instintos (v18): elige 1 de 3 al cruzar un umbral de Sintonía ----------
-  function showInstintos(umbral, ofertas, cb) {
-    world.busy = true;
-    $('instinto-nivel').textContent = umbral;
-    const cont = $('instinto-cards');
-    cont.innerHTML = '';
-    for (const inst of ofertas) {
-      const card = document.createElement('div');
-      card.className = 'inst-card';
-      if (window.Icons) card.appendChild(Icons.img(inst.icono, 26));
-      const h = document.createElement('h4');
-      h.textContent = inst.nombre;
-      card.appendChild(h);
-      const p = document.createElement('p');
-      p.textContent = inst.desc;
-      card.appendChild(p);
-      card.onclick = () => {
-        $('instinto-modal').style.display = 'none';
-        if ($('exit-modal').style.display === 'none' && $('dice-overlay').style.display === 'none' &&
-            $('choice-modal').style.display === 'none' && !backpackAbierta())
-          world.busy = false;
-        if (window.Sfx) Sfx.play('recoger');
-        cb(inst.id);
-      };
-      cont.appendChild(card);
-    }
-    $('instinto-modal').style.display = 'flex';
-    if (window.Sfx) Sfx.play('ui');
-  }
-
   // ---------- elección libre (beber agua, rituales…) ----------
   function showChoice(titulo, texto, opciones) {
+    if (document.pointerLockElement) document.exitPointerLock();
     world.busy = true;
     $('choice-title').textContent = titulo;
     $('choice-text').textContent = texto;
@@ -598,6 +719,7 @@
   function toggleJournal() {
     const p = $('journal-panel');
     const visible = p.style.display !== 'none';
+    if (!visible && document.pointerLockElement) document.exitPointerLock();
     p.style.display = visible ? 'none' : 'block';
     if (!visible) renderJournal($('journal-list'));
   }
@@ -751,6 +873,7 @@
   let codexVisible = false;
   function toggleCodex(force) {
     codexVisible = force !== undefined ? force : !codexVisible;
+    if (codexVisible && document.pointerLockElement) document.exitPointerLock();
     $('codex-panel').style.display = codexVisible ? 'flex' : 'none';
     if (codexVisible) renderCodex();
     // pausa el juego mientras el códice está abierto (sin pisar modales/dado)
@@ -760,10 +883,33 @@
         world.busy = false;
     }
   }
-  $('btn-codex-close').onclick = () => toggleCodex(false);
+  if ($('btn-codex-close')) $('btn-codex-close').onclick = () => toggleCodex(false);
+  if ($('btn-codex-close-top')) $('btn-codex-close-top').onclick = () => toggleCodex(false);
+  $('codex-panel').onclick = (ev) => {
+    if (ev.target === $('codex-panel') || ev.target.classList.contains('codex-box-wrapper')) toggleCodex(false);
+  };
+
+  // ---------- changelog ----------
+  let changelogVisible = false;
+  function toggleChangelog(force) {
+    changelogVisible = force !== undefined ? force : !changelogVisible;
+    if (changelogVisible && document.pointerLockElement) document.exitPointerLock();
+    $('changelog-panel').style.display = changelogVisible ? 'flex' : 'none';
+    if (changelogVisible && window.Changelog) Changelog.render($('changelog-list'));
+    if (world.level && !world.over) {
+      if (changelogVisible) world.busy = true;
+      else if ($('exit-modal').style.display === 'none' && $('dice-overlay').style.display === 'none')
+        world.busy = false;
+    }
+  }
+  if ($('btn-changelog-close-top')) $('btn-changelog-close-top').onclick = () => toggleChangelog(false);
+  $('changelog-panel').onclick = (ev) => {
+    if (ev.target === $('changelog-panel') || ev.target.classList.contains('codex-box-wrapper')) toggleChangelog(false);
+  };
 
   // ---------- fin ----------
   function showEnd(victoria, causa) {
+    if (!world._muerteSmiler) document.body.classList.remove('smiler-death');
     show('end');
     if (window.Sfx) setTimeout(() => Sfx.idle(true, victoria ? 'victoria' : 'muerte'), 1600);
     const t = $('end-title');
@@ -780,7 +926,7 @@
   world.ui = {
     log, updateHUD, flashDamage, showLevelCard, showDice,
     showExitModal, showLevelPicker, showChoice, toggleJournal, showEnd, show, toggleCodex,
-    toggleBackpack, toggleLog, showInstintos,
+    toggleBackpack, toggleLog, pulsarMano, toggleChangelog,
     get flashT() { return flashT; },
   };
 })();

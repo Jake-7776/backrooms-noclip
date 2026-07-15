@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Qué es
 
-Roguelike top-down de las Backrooms para navegador, en JavaScript vanilla + Canvas 2D, sin dependencias ni build tools (no hay `package.json`). Todo el contenido, la UI y los comentarios están en **español**; los títulos de la wiki (`Level 0`, `Faceling`) quedan en inglés.
+**El juego es un MMO de las Backrooms: un sandbox multijugador en tiempo real (el modo online es el PRINCIPAL y el que se juega en producción).** Top-down/3ª persona para navegador, en JavaScript vanilla + Canvas 2D / Three.js, sin build tools en el cliente (la única carpeta con `package.json` es `server/`). Todo el contenido, la UI y los comentarios están en **español**; los títulos de la wiki (`Level 0`, `Faceling`) quedan en inglés.
+
+> ⚠️ **MODO POR DEFECTO = ONLINE.** Salvo que el usuario diga lo contrario, cualquier petición ("añade X", "arregla Y", "cambia Z") se refiere al **modo online multijugador** (servidor en `server/` + cliente en `game/js/net/`, arrancado con `?online`). El modo por turnos offline (`?autostart=1`, sin `?online`) es un **respaldo secundario de un jugador** que se conserva por paridad, no el objetivo principal. Al implementar cualquier cambio de mecánica/HUD/salida/combate hay que pensar PRIMERO en el online y verificar que funciona con servidor real; el modo solo se actualiza después para mantener la paridad. Ver las entradas **v21-v30** más abajo (arquitectura cliente/servidor, autoridad del cliente con validación, protocolo `P.VERSION`).
 
 El contenido del juego (niveles, entidades, objetos) se deriva de la wiki backrooms.fandom.com mediante un pipeline de datos en Node, y luego se cura a mano en fichas en español.
 
@@ -18,9 +20,12 @@ node pipeline/parse.js         # Fase 1: wikitext → data/parsed/{levels,entiti
 node pipeline/select-pilot.js  # Fase 2a: elige los ~30 niveles del piloto (BFS desde Level 0 + camino de escape) → data/game/pilot-titles.json
 node pipeline/make-map.js      # Fase 2b: regenera data/game/mapa-piloto.html (diagrama SVG del grafo) desde levels.es.json
 node pipeline/build-data.js    # empaqueta data/game/*.es.json → game/js/data.js  ← RE-EJECUTAR tras editar cualquier ficha
+node pipeline/build-assets-manifest.js  # inventaría game/assets/ → game/js/assets-manifest.js ← RE-EJECUTAR tras añadir/quitar sprites/sonidos/iconos (el juego solo carga lo inventariado; sin sondeos ni 404)
 ```
 
-Para jugar: abrir `game/index.html` directamente en el navegador (funciona por `file://` porque los datos van embebidos en `game/js/data.js`; no usar `fetch` de JSON en el juego por esa razón).
+Para jugar (modo PRINCIPAL, online): `node server/server.js` → http://localhost:8080 (WebSocket `/ws`; `MMO_DEV=1` habilita `?nivel=`, `MMO_ADMIN` fija la clave de guardián). Ver la entrada v21-v22 más abajo.
+
+Para jugar el respaldo por turnos (offline, un jugador): abrir `game/index.html` con `?autostart=1` directamente en el navegador (funciona por `file://` porque los datos van embebidos en `game/js/data.js`; no usar `fetch` de JSON en el juego por esa razón).
 
 ## Flujo de datos
 
@@ -123,27 +128,19 @@ norte, placa 3D a altura de vista) y las cajas decorativas son contenedores regi
 `ladoTex()` en render3d: TODAS las caras de cajas/muebles/marcos con textura (nada plano).
 `?abrir=mochila` (con autostart) abre el panel para capturas.
 
-**v18 — LA SINTONÍA (RPG del lore, no tradicional)**: `player.sintonia` 0-100 (`world.tune(n)`)
-sube con horrores (matar +8, fuego +5/kill, choque a oscuras +4, agua mala +6, remodelación
-+2, salida void/arriesgada +5, goteos por cordura<25 y peligro≥4) y baja apenas (amuleto −5,
-peligro≤1 −1/50t). Umbrales 20/40/60/80 → `ofrecerInstinto` (RNG `runSeed::instinto::umbral`)
-→ `ui.showInstintos` (elige 1 de 3 cartas; el selftest clica la primera). 8 Instintos
-(`INSTINTOS` en game.js): oido_moqueta (minimapa), pies_moqueta (detección −2),
-reflejos_errante (25% esquiva), visceras_vacio (drenaje ÷2), lengua_paredes (sin pifias al
-registrar), piel_fluorescente (+1 visión, inmune a atraida_luz), sangre_amarilla (regen 1/12t,
-agua ÷2), noclip (min 80; tecla G, −10 cordura, d20≤3 = Vacío). PRECIO: en `detecta()` las
-no-cazadoras te ignoran con prob (sintonia−20)/180, y la salida `escape` tira d20 vs
-sintonia/5 — fallo = «la realidad te rechaza» (a 100 no se puede escapar). Moodle ojo
-amarillo fijo con sintonía≥10. **Combate/escape**: TELEGRAPH en `atacar(world,e,rng)` —
-anuncia ⚠ un turno (parpadeo ámbar en render3d), moverse lo esquiva; Cazador solo avisa su
-1er golpe; guard `_turnoAtaque` (un intento/turno). RUIDO: `world.hacerRuido(x,y,radio)`
-(registrar r10, golpes r8, arrojar r12; caduca a los 8 turnos) → entidades no-caza lo
-investigan (`stepHacia`). Rastro: 3 turnos sin detectar → abandona (contador `sinVerte`).
+**v18 — Combate y escape**: TELEGRAPH en `atacar(world,e,rng)` — anuncia ⚠ un turno
+(parpadeo ámbar en render3d), moverse lo esquiva; Cazador solo avisa su 1er golpe; guard
+`_turnoAtaque` (un intento/turno). RUIDO: `world.hacerRuido(x,y,radio)` (registrar r10,
+golpes r8, arrojar r12; caduca a los 8 turnos) → entidades no-caza lo investigan
+(`stepHacia`). Rastro: 3 turnos sin detectar → abandona (contador `sinVerte`).
 `Game.arrojarItem` (botón «Arrojar» en la ficha) = distracción. ESCONDERSE: ESPACIO sobre
 taquilla/nevera/archivador REGISTRADO (`world.escondido`, `ESCONDITES` en game.js);
 indetectable salvo delatado (te vieron entrar o tirada 15%/4% cerca); sacado del escondite
 = daño ×1.5; jugador invisible en ambos renders; tryMove/usarMano bloqueados dentro.
-`?abrir=instinto` fuerza el modal. sintonia/instintos/umbrales viajan en el guardado.
+(v18 introdujo también LA SINTONÍA, un RPG narrativo con 8 Instintos por umbrales de
+`player.sintonia` — **retirado por completo a petición del usuario** tras la era comunitaria:
+sin rastro en game.js/entities.js/ui.js/main.js/index.html/minimap.js/style.css. La columna
+`sintonia` de `server/db.js` queda como vestigio muerto, sin lectura ni escritura.)
 
 **v19 — manos Q/E, expansión suave del todo, códice y mapa**: SIN clics en el canvas —
 usar manos = **Q/E** o clic EN la caja de la mano del HUD (`usarMano`); en el panel de la
@@ -171,8 +168,7 @@ del máx) + greedy max-min contra spawn y salidas ya puestas. **Equipo vestible*
 `world.equipado(id)`, `Game.ponerEquipo/quitarEquipo`, fila «Vistiendo» en la mochila
 (drag + PONERSE en ficha); chaqueta equipo:cuerpo (frío exige PUESTA), `mascara_gas`
 (drenajes de cordura ambientales ÷2 en rules), `botas_reforzadas` (inmune charcos sirena,
-detección −1). `#bp-efectos` = chips de buffs/debuffs con tooltip (Game.INSTINTOS
-exportado). Tooltips instantáneos CSS: `.tip-left`/`.tip-up` + `data-tip` (moodles con
+detección −1). `#bp-efectos` = chips de buffs/debuffs con tooltip. Tooltips instantáneos CSS: `.tip-left`/`.tip-up` + `data-tip` (moodles con
 consejo). Arrojar DISTRAE de verdad: `e.distraida=3` (van al ruido aunque cacen) y el
 Cazador `paralizada=2`. Golpe de tubería: retroceso solo 25% (si no, el telegraph enemigo
 nunca conectaba). X = bocadillo de espera. Códice: icono-interrogante → wiki real en cartas
@@ -272,7 +268,9 @@ de ESQUINAS el resultado es caótico (60 ms deciden de qué lado de un pilar sal
 2.3 tiles de desviación máx, irreducible). En un cooperativo la autoridad correcta es el
 CLIENTE: integra su física local (input vectorial o intención av/giro con
 `Fisica.GIRO_JUGADOR`) y reporta `{t:'p', x, y, rot, sec}` ~15/s; `sala.posicion()` VALIDA:
-cubeta de velocidad (anti-speedhack, Σdist ≤ vel·Σt·1.12, techo 1.3), `caminoLegal()`
+cubeta de velocidad (anti-speedhack, Σdist ≤ vel·Σt·1.12, techo acumulado 3.2
+para cubrir el `dtNet` de 0.6 s, pero máximo 1.3 por informe); tras un microparón
+el cliente trocea y reporta el rastro real para conservar curvas junto a paredes; `caminoLegal()`
 (anti-noclip: muestreo cada 0.2 tiles con radio 0.22 — atrapa cualquier muro de 1 tile) y
 `sec` (nº de teleport del servidor: esconder/cruzar/rechazo lo suben y los informes en
 vuelo caducan; el cliente lo ecoa). Informe ilegal → 'mueve' con la última posición válida
@@ -280,8 +278,9 @@ vuelo caducan; el cliente lo ecoa). Informe ilegal → 'mueve' con la última po
 propio se ignora. El servidor ya NO integra jugadores (sí entidades); tick a 20 Hz.
 Escondido = el servidor ignora informes (salir con ESPACIO). bots.js genera el mapa desde
 la semilla y camina con la física real (30 bots → 0 rechazos: sin falsos positivos).
-Tests del validador en test-integracion.js: speedhack ~23 t/s → 0.9 tiles aceptados,
-teleport 2.5 → rechazo+sec, escondite funcional. OJO arneses: ESPACIO junto a una taquilla
+Tests del validador en test-integracion.js: speedhack ~23 t/s queda dentro del presupuesto,
+microparón de 0.6 s acepta el rastro y teleport 2.5 → rechazo+sec; escondite funcional.
+OJO arneses: ESPACIO junto a una taquilla
 te ESCONDE (los informes se ignoran) — salir antes de navegar; y para re-ofertar una
 salida hay que alejarse >1 tile de TODAS (histéresis).
 
@@ -315,6 +314,68 @@ el haz al sur). Ajustes: `window.VERSION_JUEGO` visible, botón pantalla complet
 Debug (online = `/tp`) y `#debug-stats` (barras salud/comida/bebida/cordura, ui.js). Local
 sin servidor: cualquier clave desbloquea. Arnés de integración e2e usado en v23 (levanta
 servidor real + cliente ws): reproducirlo si se toca sala/protocolo.
+
+**v29 — riesgoVoid unificado, Sala Manila y salida de emergencia canon**: el dado de
+riesgoVoid (salidas `arriesgada` con `riesgoVoid>0`, ej. `level-0→level-27`) ahora también
+se tira en `server/sala.js::cruzar()` (antes solo en el modo solo) — mismo `this.rng` de
+sala, mismo bonus de trébol, mensaje `dado` solo al afectado, `morir()` en fallo; test
+dedicado `server/test-riesgo-void.js` (level-909, riesgoVoid:0.1, hasta 60 intentos hasta
+observar ambos desenlaces). Nueva **Sala Manila** en Level 0 (fiel a la wiki real): salida
+sin casilla con `mecanica:'manila'` y `destino:'*opciones:level-1,level-2'` — nuevo sentinel
+de destino (junto a `*aleatoria`/`*visitada`) resuelto en `crossExit`(game.js)/`cruzar`
+(sala.js) con `rng.pick` sobre la lista separada por comas. `genPasillos` (mapgen.js) ahora
+devuelve `{grid, rects}` (antes descartaba los rectángulos de sala); `generate()` separa la
+salida `manila` de las demás (no se coloca como punto, como ya hacía `caminata`) y con 20%
+de probabilidad elige un rect lejos del spawn como `map.manila` — expuesto junto a
+`map.manilaSalida` (la definición ya con `_mec:'manila'`). Permanencia por TIEMPO REAL (no
+turnos/pasos, `MapGen.manilaGoal(salidaDef, seedKey, intento)` sobre `permanenciaS`
+[180,300]): offline en `worldStep` con `performance.now()` (avisos al 50%/80%, reproyección
+del rect en `desplazarVentana` si Level 0 desplaza su ventana infinita); online en
+`Sala.manilaAvanza(jug)` llamado desde `posicion()` — usa un campo PROPIO `jug.manila`
+(NUNCA `jug.canal`: ese campo bloquea `accion()` y habría dejado al jugador sin poder
+registrar ni esconderse durante minutos). Luz naranja tenue: `actualizarLucesTecho`
+(render3d.js) tiñe a `0xff8c40` los fluorescentes del pool cuyo panel cae dentro de
+`map.manila`. Test `server/test-manila.js`: generación (frecuencia ~20%, determinismo),
+`Sala.manilaAvanza` con `Date.now` sustituido por un reloj controlado (sin esperar minutos
+reales) y cancelación al salir del rect. Además: nueva salida de emergencia canon
+`level-0→level-14` con `ritual:'emergencia'` (patrón `SPEC`/`PINTORES` de render3d.js +
+`drawRitual` de render.js) — puerta roja con rótulo "EXIT" parpadeante y una `PointLight`
+roja fija junto a la puerta, para que se distinga de cualquier otra puerta del juego. Y se
+**retiró por completo LA SINTONÍA** (el RPG de Instintos de v18) del modo solo a petición
+del usuario — ver la nota en la entrada v18 de más arriba.
+
+**v30 — Sala de Control y modo espectador (protocolo v8)**: para los directos del streamer.
+`/observatorio/mapa` (`server/observatorio-mapa.html`, botón 🗺 en /observatorio) = mapa VIVO
+del grafo de niveles: mismo layout BFS por capas y estética que `mapa-piloto.html` (el
+algoritmo está COPIADO en la página; los datos los da `/grafo`, cache en server.js con el
+sentinel `*opciones:` resuelto), badges con jugadores por nivel vía `/observa` cada 2 s,
+clic en nivel → panel con jugadores y botones 👁 Espectar/kick/ban, ticker de eventos por
+DIFF entre polls (entra/cruza/muere/⭐escapa por delta de `historico.escapes`) y 📢 anuncio
+(`/accion {accion:'anuncio'}`). MODO ESPECTADOR: `jug.espectador={objetivo}` en sala.js —
+invisible (censo() lo excluye, 'sale' al entrar, 'entra' al salir), intocable (guards en
+herir/morir/accion/loot/usar/mochila/chat/cruzar/luz + filtros `!j.espectador` en los 5
+puntos de sim/entidades.js), `posicion()` lo ignora (el cliente NO reporta). El cruce del
+objetivo arrastra a sus espectadores: bucle al final de `cambiarDeSala` → `moverEspectador`
+(server.js) que NO pasa por `asignar()` — va a la MISMA instancia (con asignar, sala llena
+= instancia distinta y pierdes la acción). `espectar()` en server.js lo comparten el ws
+`{t:'espectar', objetivo|null}` (solo esAdmin) y `/accion espectar` (busca al guardián
+conectado más reciente; espectar-fin lo saca). Cliente: `w.espectador` — `Net.frame` pega
+`player.x/y` a la posición interpolada del objetivo en Otros (FOV radio ≥14 y AMBOS renders
+siguen la acción gratis), cámara CENITAL en render3d (rueda = altura vía `Render3D.espAlt`
+5-26, techo+paneles con `material.visible=false` cada frame = casa de muñecas, niebla
+~fuera, sprite propio oculto también en render.js 2D), barra `#espectador-bar`
+(body.espectando oculta el HUD por CSS), ←/→ cambian objetivo, ESC sale. Al desconectar el
+objetivo, `dejarDeEspectar` con aviso. Test: `server/test-espectador.js` (22 asserts, ws
+real). OJO: subir protocolo obliga a `v:` en cliente.js, bots.js y TODOS los test-*.js.
+
+**v30.3 — árboles 3D en los bosques**: en render3d.js la rama orgánica de `construirEstatica`
+ya no usa billboards para `wallStyle === 'arbol'` (L45/186/626/6.1): cada casilla de pared
+genera un árbol seco 3D — prismas cuadrados que se afilan (`rama`) con crecimiento recursivo
+(`crecer`, 1-3 hijas por rama, prof 3 o 2 si la casilla está rodeada de arboleda), corteza
+`p-corteza` con la paleta del nivel, decal de sombra a los pies y todo determinista por
+casilla vía `seededUnit`. Fusionado por bandas (flush cada 8 filas) como los muros; SIN
+`castShadow` (el PointLight pintaba manchones negros sobre miles de ramas finas). Las rocas
+de `exterior` siguen siendo billboards.
 
 (Todos existen y están committeados. v3: render cenital con paredes finas autotile en `tiles.js`/`render.js`,
 pixel-art data-driven en `sprites.js` con override PNG desde `game/assets/sprites/`, efectos de combate

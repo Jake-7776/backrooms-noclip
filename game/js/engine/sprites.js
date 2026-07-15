@@ -503,8 +503,210 @@
 
   const cache = {};      // id -> [canvas, canvas]
   const overrides = {};  // id -> [canvas...] desde PNG
+  let overrideVersion = 0;
+
+  function itemRows(tipo) {
+    const rows = {
+      botella: [
+        '................',
+        '.......gg.......',
+        '......gGGg......',
+        '......gGGg......',
+        '.....gCCCCg.....',
+        '.....gCCCCg.....',
+        '.....gCCCCg.....',
+        '.....gCCCCg.....',
+        '.....gCCCCg.....',
+        '.....gCCCCg.....',
+        '.....gCCCCg.....',
+        '......gggg......',
+        '................',
+        '................',
+        '................',
+        '................',
+      ],
+      caja: [
+        '................',
+        '................',
+        '.....gggggg.....',
+        '....gCCCCCCg....',
+        '...gCCCCCCCCg...',
+        '...gCCcCCcCCg...',
+        '...gCCCCCCCCg...',
+        '...gCccccccCg...',
+        '...gCCCCCCCCg...',
+        '...gCCcCCcCCg...',
+        '...gCCCCCCCCg...',
+        '....gggggggg....',
+        '................',
+        '................',
+        '................',
+        '................',
+      ],
+      herramienta: [
+        '................',
+        '..........gg....',
+        '.........gCCg...',
+        '........gCCg....',
+        '.......gCCg.....',
+        '......gCCg......',
+        '.....gCCg.......',
+        '....gCCg........',
+        '...gCCg.........',
+        '..gCCg..........',
+        '..gCg...........',
+        '..gg............',
+        '................',
+        '................',
+        '................',
+        '................',
+      ],
+      arma: [
+        '................',
+        '................',
+        '...gggggggggg...',
+        '..gCCCCCCCCCCg..',
+        '..gCCCCgggggg...',
+        '...ggCCg........',
+        '.....gCCg.......',
+        '.....gCCg.......',
+        '......gg........',
+        '................',
+        '................',
+        '................',
+        '................',
+        '................',
+        '................',
+        '................',
+      ],
+      luz: [
+        '................',
+        '.......YY.......',
+        '......YGGY......',
+        '.....YGCCGY.....',
+        '....YGCCCCGY....',
+        '.....YGCCGY.....',
+        '......YGGY......',
+        '.......YY.......',
+        '.......gg.......',
+        '......gCCg......',
+        '......gCCg......',
+        '.......gg.......',
+        '................',
+        '................',
+        '................',
+        '................',
+      ],
+      papel: [
+        '................',
+        '.....gggggg.....',
+        '....gCCCCCCg....',
+        '....gCccccCg....',
+        '....gCCCCCCg....',
+        '....gCccccCg....',
+        '....gCCCCCCg....',
+        '....gCccccCg....',
+        '....gCCCCCCg....',
+        '....gCCCCCCg....',
+        '.....gggggg.....',
+        '................',
+        '................',
+        '................',
+        '................',
+        '................',
+      ],
+      mineral: [
+        '................',
+        '................',
+        '.......g........',
+        '......gCg.......',
+        '.....gCCCg......',
+        '....gCCcCCg.....',
+        '...gCCCCCCCg....',
+        '....gCCcCCg.....',
+        '.....gCCCg......',
+        '......gCg.......',
+        '.......g........',
+        '................',
+        '................',
+        '................',
+        '................',
+        '................',
+      ],
+      peligro: [
+        '................',
+        '.......gg.......',
+        '......gCCg......',
+        '.....gCCCCg.....',
+        '....gCCCCCCg....',
+        '...gCCCCCCCCg...',
+        '..gCCCCccCCCCg..',
+        '...gCCCCCCCCg...',
+        '....gCCccCCg....',
+        '.....gCCCCg.....',
+        '......gCCg......',
+        '.......gg.......',
+        '................',
+        '................',
+        '................',
+        '................',
+      ],
+      refugio: [
+        '................',
+        '................',
+        '......gggg......',
+        '.....gCCCCg.....',
+        '....gCCCCCCg....',
+        '...gCCCCCCCCg...',
+        '...gCCcCCcCCg...',
+        '...gCCCCCCCCg...',
+        '...gCCCCCCCCg...',
+        '...gCCcCCcCCg...',
+        '...ggggggggg....',
+        '................',
+        '................',
+        '................',
+        '................',
+        '................',
+      ],
+    };
+    return rows[tipo] || rows.caja;
+  }
+
+  function itemTipo(def) {
+    const e = def.efecto || {};
+    const t = `${def.id} ${def.nombre}`.toLowerCase();
+    if (e.toggle === 'luz' || /lantern|linterna|bulb|flash|luz|llama|fire|fuego/.test(t)) return 'luz';
+    if (e.activo === 'disparo' || /rifle|brc|anark|automatic|arma/.test(t)) return 'arma';
+    if (e.activo === 'salida' || e.activo === 'blink' || /key|llave|pomo|portal|cubo|hyperlink|ascensor/.test(t)) return 'herramienta';
+    if (e.activo === 'riesgo' || e.activo === 'toxina' || e.activo === 'gas' || /pain|void|corrupt|nuclear|gas/.test(t)) return 'peligro';
+    if (e.activo === 'claridad' || /diario|fax|box|heads|server|archivo|telefono/.test(t)) return 'papel';
+    if (/stone|silicate|crystal|salt|fiolgine|energy/.test(t)) return 'mineral';
+    if (e.activo === 'refugio' || e.pasivo || /jacket|mask|boots|guante|traje|ocelot/.test(t)) return 'refugio';
+    if (e.salud || e.sed || e.cordura || /water|juice|soup|candy|jelly|meat|asada|caramelo|sopa|bebida/.test(t)) return 'botella';
+    return 'caja';
+  }
+
+  function addObjectSprites() {
+    const objects = window.GAME_DATA?.objects || {};
+    for (const [id, def] of Object.entries(objects)) {
+      if (DEFS[id]) continue;
+      const c = def.color || '#d8c070';
+      DEFS[id] = {
+        pal: {
+          C: c,
+          c: shadeHex(c, 0.65),
+          G: shadeHex(c, 1.35),
+          g: OUT,
+          Y: '#fff1a8',
+        },
+        frames: [itemRows(itemTipo(def)), itemRows(itemTipo(def))],
+      };
+    }
+  }
 
   function build() {
+    addObjectSprites();
     for (const [id, def] of Object.entries(DEFS))
       cache[id] = def.frames.map((rows) => rasterize(def.pal, rows));
     // variantes HERIDO del jugador (v15): sangre y palidez sobre el sprite base
@@ -564,26 +766,49 @@
   }
   const tiene = (id) => !!(overrides[id] || cache[id]);
 
-  // intenta cargar PNGs externos (hoja horizontal de frames de 48×48)
-  function tryOverrides(ids) {
-    for (const id of ids) {
-      if (overrides[id]) continue;
-      const img = new Image();
-      img.onload = () => {
-        const n = Math.max(1, Math.floor(img.width / 48));
-        const frames = [];
-        for (let i = 0; i < n; i++) {
-          const c = document.createElement('canvas');
-          c.width = 48; c.height = 48;
-          c.getContext('2d').drawImage(img, i * 48, 0, 48, 48, 0, 0, 48, 48);
-          frames.push(c);
-        }
-        overrides[id] = frames;
-      };
-      img.src = 'assets/sprites/' + id + '.png';
-    }
+  function cargarOverride(id, url) {
+    const img = new Image();
+    img.onload = () => {
+      const frameW = img.height === 48 ? 48 : Math.max(1, img.height);
+      const n = Math.max(1, Math.floor(img.width / frameW));
+      const frames = [];
+      for (let i = 0; i < n; i++) {
+        const c = document.createElement('canvas');
+        c.width = 48; c.height = 48;
+        const ctx = c.getContext('2d');
+        ctx.imageSmoothingEnabled = false;
+        const sx = i * frameW;
+        const sw = Math.min(frameW, img.width - sx);
+        const sh = img.height;
+        const esc = Math.min(48 / sw, 48 / sh);
+        const dw = Math.max(1, Math.round(sw * esc));
+        const dh = Math.max(1, Math.round(sh * esc));
+        const dx = Math.round((48 - dw) / 2);
+        const dy = Math.round(48 - dh);
+        ctx.drawImage(img, sx, 0, sw, sh, dx, dy, dw, dh);
+        frames.push(c);
+      }
+      overrides[id] = frames;
+      overrideVersion++;
+    };
+    img.src = url;
+    return img;
   }
 
+  // Carga imágenes externas (hoja horizontal de frames de 48x48) para los ids
+  // pedidos, SOLO si aparecen en el manifiesto de assets reales
+  // (game/js/assets-manifest.js). Sin archivo, queda el sprite procedural.
+  // v30.5: SIN sondeos de red — antes se probaban 12 URLs por id (3 carpetas ×
+  // 4 extensiones) y la consola/red se llenaban de cientos de 404 al abrir la
+  // web. Tras añadir/quitar imágenes en game/assets/:
+  //   node pipeline/build-assets-manifest.js
+  function tryOverrides(ids) {
+    const M = (window.ASSETS_MANIFEST || {}).sprites || {};
+    for (const id of ids) {
+      if (overrides[id] || !M[id]) continue;
+      cargarOverride(id, M[id]);
+    }
+  }
   // ---------- props del entorno ----------
   // mueble con volumen: frente + techo iluminado + lateral derecho en sombra
   function mueble(ctx, cx, baseY, w, h, color) {
@@ -744,6 +969,17 @@
     ctx.restore();
   }
 
+  // capa visual de la máscara de gas (v25.1): sin arte procedural — solo
+  // overrides PNG en game/assets/sprites/mascara_down.png, _up.png, _side.png
+  // (hoja horizontal de 48×48 como cualquier otro override; opcional, si no
+  // existen no se dibuja nada). Se compone SOBRE el sprite del jugador.
+  const CAPA_MASCARA_GAS = ['mascara_down', 'mascara_up', 'mascara_side'];
+
   build();
-  window.Sprites = { get, tryOverrides, drawProp, frameCount, tiene, list: () => Object.keys(DEFS) };
+  window.Sprites = {
+    get, tryOverrides, drawProp, frameCount, tiene,
+    list: () => Object.keys(DEFS),
+    CAPA_MASCARA_GAS,
+    version: () => overrideVersion,
+  };
 })();

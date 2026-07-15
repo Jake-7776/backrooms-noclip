@@ -1,7 +1,7 @@
 // Protocolo v1 de BACKROOMS MMO — mensajes JSON pequeños sobre WebSocket.
 //
 // Cliente → servidor:
-//   {t:'hola', nombre, token, v}        presentarse (v = versión de protocolo)
+//   {t:'hola', nombre, token, v, sala?} presentarse (sala = código privado opcional)
 //   {t:'mover', dx, dy}                 intento de paso a casilla adyacente
 //   {t:'rot', rot}                      girar sobre sí mismo (0-3, gratis)
 //   {t:'chat', txt}                     mensaje de chat (≤120 chars)
@@ -19,7 +19,7 @@
 //   {t:'pong'}
 'use strict';
 
-const VERSION = 7; // v25: loot/cajas/dados client-side, cámara libre — el server solo valida
+const VERSION = 8; // v30: modo espectador del guardián (mensaje 'espectar')
 const MAX_MSG = 512;          // bytes por mensaje entrante
 const MAX_CHAT = 120;         // caracteres de un chat
 const COOLDOWN_MOVER = 165;   // ms entre pasos (el cliente usa 170: margen de jitter)
@@ -27,6 +27,7 @@ const COOLDOWN_CHAT = 1500;   // ms entre mensajes de chat
 const RADIO_CHAT = 14;        // casillas: el chat es de PROXIMIDAD (voz, no megafonía)
 const CAP_SALA = 60;          // jugadores por instancia de nivel
 const CAP_POR_IP = 8;         // conexiones simultáneas por IP
+const MAX_SALA_PRIVADA = 32;  // caracteres máximos del código de sala privada
 
 // Parsea y valida la FORMA de un mensaje entrante. Devuelve null si no es válido.
 function leer(raw) {
@@ -40,6 +41,7 @@ function leer(raw) {
       if (typeof m.nombre !== 'string' || typeof m.token !== 'string') return null;
       if (m.token.length > 64) return null;
       if (m.nivel !== undefined && (typeof m.nivel !== 'string' || m.nivel.length > 32)) return null;
+      if (m.sala !== undefined && (typeof m.sala !== 'string' || m.sala.length > MAX_SALA_PRIVADA)) return null;
       return m;
     case 'p': { // v24: POSICIÓN reportada por el cliente (él es la autoridad
       // del movimiento; el servidor la VALIDA — velocidad, paredes, teleports)
@@ -79,6 +81,14 @@ function leer(raw) {
       if (typeof m.clave !== 'string' || m.clave.length > 64) return null;
       return { t: 'admin', clave: m.clave };
     }
+    case 'espectar': { // v30: el guardián observa a un jugador (null = dejar de hacerlo)
+      // v30.7: dir = rotar al siguiente/anterior errante de TODAS las salas
+      if (m.dir === 'sig' || m.dir === 'ant') return { t: 'espectar', dir: m.dir };
+      if (m.objetivo === null || m.objetivo === undefined) return { t: 'espectar', objetivo: null };
+      const objetivo = m.objetivo | 0;
+      if (objetivo <= 0) return null;
+      return { t: 'espectar', objetivo };
+    }
     case 'ping': { // eco del sello de tiempo: el cliente mide su RTT con el pong
       const out = { t: 'ping' };
       if (m.ts !== undefined) { const ts = +m.ts; if (isFinite(ts)) out.ts = ts; }
@@ -90,6 +100,7 @@ function leer(raw) {
 }
 
 module.exports = {
-  VERSION, MAX_MSG, MAX_CHAT, COOLDOWN_MOVER, COOLDOWN_CHAT, RADIO_CHAT, CAP_SALA, CAP_POR_IP,
+  VERSION, MAX_MSG, MAX_CHAT, COOLDOWN_MOVER, COOLDOWN_CHAT, RADIO_CHAT,
+  CAP_SALA, CAP_POR_IP, MAX_SALA_PRIVADA,
   leer,
 };

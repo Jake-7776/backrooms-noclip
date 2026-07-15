@@ -16,6 +16,9 @@
   let camRot = 0;          // rotación de cámara en pasos de 90° (0-3), tecla Q (modo alta)
   let camYaw = 0;          // yaw animado (radianes)
   let yawLibre = null;     // v25 online: cámara LIBRE (ratón, estilo Roblox); null = aún sin tocar
+  let espAlt = 14;         // v30: altura de la cámara cenital de espectador (5-26)
+  let ultimoOrbitoT = 0;   // v26: timestamp del último movimiento manual de cámara (órbita)
+  let ultTCam = 0;         // v30.7: dt real de la cámara (suavizado independiente de FPS)
   // altura de muros: en 3ª persona son de altura real (la cámara va a 1.5 y JAMÁS
   // ve por encima → nunca se rompe la sensación de interior)
   const WALL_H = CAM_MODO === 'tercera' ? 2.3 : 1.2;
@@ -25,17 +28,21 @@
   let renderer, scene, camera, amb, plight, spot, dlight;
   let ceilingLights = [];
   let composer = null;           // postprocesado (bloom + gamma); null => render directo
+  let bloomPass = null;          // pase de bloom para el pulso dinámico por cordura baja
   let fogBase = 0.08;
+  let nivelClaro = 0;      // [0,1] cuánto se pasa de CLARA la paleta del nivel (v30.2)
   let glCanvas, overlay, octx, W, H;
   let levelKey = null;
   let staticGroup = null;        // suelo/muros/techo/salidas/props (reconstruible)
   let actorGroup = null;         // jugador/entidades/items (sobrevive a los rebuilds)
   let rebuild = null;            // generador de reconstrucción incremental en curso
   let itemsVersionVista = -1;    // items del suelo rehechos al cambiar world.itemsVersion
+  let spritesVersionVista = -1;
   let entitySprites = new Map(); // uid -> THREE.Sprite
   let itemSprites = new Map();   // index -> sprite
   let otrosSprites = new Map();  // id -> sprite (jugadores remotos del MMO)
   let playerSprite = null;
+  let playerMaskSprite = null;   // capa opcional (máscara de gas) sobre el jugador
   let texCache = new Map();      // clave -> THREE.Texture
   let grain = null;
   let camBobT = 0;
@@ -95,11 +102,13 @@
       try {
         composer = new THREE.EffectComposer(renderer);
         composer.addPass(new THREE.RenderPass(scene, camera));
-        composer.addPass(new THREE.UnrealBloomPass(new THREE.Vector2(W, H), 0.55, 0.4, 0.82));
+        bloomPass = new THREE.UnrealBloomPass(new THREE.Vector2(W, H), 0.55, 0.4, 0.82);
+        composer.addPass(bloomPass);
         composer.addPass(new THREE.ShaderPass(THREE.GammaCorrectionShader));
       } catch (e) {
         console.warn('Postpro desactivado:', e);
         composer = null;
+        bloomPass = null;
       }
     }
     amb = new THREE.AmbientLight(0xffffff, 0.4);
@@ -161,6 +170,19 @@
       x.beginPath(); x.arc(w - 9, h / 2 + 2, 2.6, 0, 7); x.fill();
       x.fillStyle = col; x.globalAlpha = 0.5;                           // luz bajo la puerta
       x.fillRect(4, h - 3, w - 8, 3);
+    }),
+    // puerta de emergencia (L0 → L14): metal oscuro + barra antipánico + rótulo
+    // EXIT sobre baliza roja — se distingue de cualquier otra puerta del juego
+    emergencia: () => lienzo(44, 64, (x, w, h) => {
+      x.fillStyle = '#181210'; x.fillRect(0, 0, w, h);                   // marco oscuro
+      x.fillStyle = '#3a2c28'; x.fillRect(3, 12, w - 6, h - 15);         // hoja
+      x.strokeStyle = '#5a4038'; x.lineWidth = 2;
+      x.strokeRect(7, 18, w - 14, h - 32);                                // panel
+      x.fillStyle = '#c81818';                                            // barra antipánico
+      x.fillRect(6, h - 22, w - 12, 5);
+      x.fillStyle = '#2a0808'; x.fillRect(2, 0, w - 4, 11);               // caja del rótulo
+      x.fillStyle = '#ff2020'; x.font = 'bold 8px monospace'; x.textAlign = 'center';
+      x.fillText('EXIT', w / 2, 8);
     }),
     ventana: (col) => lienzo(44, 64, (x, w, h) => {
       x.fillStyle = '#2a2a2e'; x.fillRect(0, 0, w, h);
@@ -229,6 +251,16 @@
       x.moveTo(24, 28); x.lineTo(30, 44);
       x.moveTo(16, 20); x.lineTo(12, 6);
       x.stroke();
+    }),
+    // cerco de humedad suelto: un único decal circular con caída de alpha,
+    // reutilizado por TODAS las manchas del suelo (una textura, un material).
+    mancha: () => lienzo(64, 64, (x, w, h) => {
+      const g = x.createRadialGradient(w / 2, h / 2, 2, w / 2, h / 2, w / 2 - 3);
+      g.addColorStop(0, 'rgba(18,14,7,0.5)');
+      g.addColorStop(0.65, 'rgba(18,14,7,0.25)');
+      g.addColorStop(1, 'rgba(18,14,7,0)');
+      x.fillStyle = g;
+      x.beginPath(); x.arc(w / 2, h / 2, w / 2 - 3, 0, 7); x.fill();
     }),
     escalera: (col) => lienzo(48, 48, (x, w, h) => {
       x.fillStyle = '#0a0806'; x.fillRect(0, 0, w, h);
@@ -380,6 +412,7 @@
     itemSprites.clear();
     otrosSprites.clear();
     playerSprite = null;
+    playerMaskSprite = null;
   }
 
   function quad(pos, uv, idx, corners, uvRect, nor) {
@@ -465,6 +498,23 @@
       bandas.push(m);
       floorPos = []; floorUv = []; floorIdx = []; floorNor = [];
     };
+    // --- MANCHAS sueltas (v28.1): cercos de humedad dispersos en vez de la
+    // textura macro repitiéndolos cada 2 tiles. Un único decal reutilizado,
+    // por tile se decide con seededUnit (misma técnica que los grupos de
+    // fluorescentes) — determinista y sin crear un RNG por casilla. ~4 % de
+    // las casillas de moqueta_humeda tienen una, con radio/posición al azar.
+    const manchaTex = tiles.manchas ? pintado('p-mancha', PINTORES.mancha) : null;
+    const matMancha = manchaTex ? new THREE.MeshBasicMaterial({ map: manchaTex, transparent: true }) : null;
+    let manchaPos = [], manchaUv = [], manchaIdx = [], manchaNor = [];
+    const flushManchas = () => {
+      if (!manchaPos.length) return;
+      const m = mkFlat(manchaPos, manchaUv, manchaIdx, manchaNor, matMancha);
+      m.receiveShadow = false;
+      grupo.add(m);
+      bandas.push(m);
+      manchaPos = []; manchaUv = []; manchaIdx = []; manchaNor = [];
+    };
+    const UMBRAL_MANCHA = 0.04;
     const aguaPos = [], aguaUv = [], aguaIdx = [], aguaNor = [];
     const plantas = [];
     const esVerde = world.level.bioma === 'invernadero' || world.level.bioma === 'bosque';
@@ -481,10 +531,23 @@
             [[x, 0.02, y + 1], [x + 1, 0.02, y + 1], [x + 1, 0.02, y], [x, 0.02, y]],
             [0, 0, 1, 1], aguaNor);
         else if (v === T.DECOR && esVerde) plantas.push([x, y]);
+        if (matMancha && v === T.SUELO) {
+          const clave = `${world.runSeed}:${world.ventanaN || 0}:mancha:${x}:${y}`;
+          const u = seededUnit(clave);
+          if (u < UMBRAL_MANCHA) {
+            const r = 0.22 + seededUnit(clave + ':r') * 0.26;
+            const jx = x + 0.5 + (seededUnit(clave + ':x') - 0.5) * 0.5;
+            const jy = y + 0.5 + (seededUnit(clave + ':y') - 0.5) * 0.5;
+            quad(manchaPos, manchaUv, manchaIdx,
+              [[jx - r, 0.02, jy + r], [jx + r, 0.02, jy + r], [jx + r, 0.02, jy - r], [jx - r, 0.02, jy - r]],
+              [0, 0, 1, 1], manchaNor);
+          }
+        }
       }
-      if ((y & 15) === 15) { flushSuelo(); yield; }
+      if ((y & 15) === 15) { flushSuelo(); flushManchas(); yield; }
     }
     flushSuelo();
+    flushManchas();
     if (aguaPos.length)
       grupo.add(mkFlat(aguaPos, aguaUv, aguaIdx, aguaNor, new THREE.MeshLambertMaterial({ map: aguaTex })));
     yield;
@@ -757,15 +820,125 @@
         }
         yield;
       }
+    } else if (tiles.wallStyle === 'arbol') {
+      // bosque: árboles secos en 3D REAL — tronco y ramas nudosas como prismas
+      // que se afilan, fusionados por bandas (antes eran billboards planos que
+      // giraban con la cámara). La forma de cada árbol es determinista por
+      // casilla (seededUnit), igual que las manchas y los fluorescentes.
+      const cortezaTex = pintado('p-corteza', () => lienzo(32, 32, (x2, w2, h2) => {
+        x2.fillStyle = SH(pal.pared, 0.45); x2.fillRect(0, 0, w2, h2);
+        for (let i = 0; i < 6; i++) {                        // vetas verticales
+          x2.fillStyle = SH(pal.pared, i % 2 ? 0.32 : 0.6);
+          x2.fillRect((i * 6 + 2) % w2, 0, 2, h2);
+        }
+        x2.fillStyle = SH(pal.pared, 0.85);                  // luz lateral
+        x2.fillRect(9, 0, 1, h2); x2.fillRect(24, 0, 1, h2);
+        x2.fillStyle = '#0e0c0a';                            // nudos
+        x2.fillRect(14, 7, 3, 5); x2.fillRect(26, 21, 3, 4);
+      }));
+      const matArbol = new THREE.MeshLambertMaterial({ map: cortezaTex });
+      // la sombra a los pies iba pintada en el tile 2D: aquí es un decal suave
+      const matSombra = new THREE.MeshBasicMaterial({
+        map: pintado('p-sombra-arbol', () => lienzo(32, 32, (x2, w2, h2) => {
+          const gr = x2.createRadialGradient(16, 16, 2, 16, 16, 15);
+          gr.addColorStop(0, 'rgba(0,0,0,0.42)');
+          gr.addColorStop(1, 'rgba(0,0,0,0)');
+          x2.fillStyle = gr; x2.fillRect(0, 0, w2, h2);
+        })),
+        transparent: true, depthWrite: false,
+      });
+      let aPos = [], aUv = [], aIdx = [], aNor = [];
+      let sPos = [], sUv = [], sIdx = [], sNor = [];
+      const flushArboles = () => {
+        if (sPos.length) {
+          const m = mkFlat(sPos, sUv, sIdx, sNor, matSombra);
+          m.receiveShadow = false;
+          grupo.add(m); bandas.push(m);
+          sPos = []; sUv = []; sIdx = []; sNor = [];
+        }
+        if (aPos.length) {
+          const m = mkFlat(aPos, aUv, aIdx, aNor, matArbol);
+          // sin castShadow: la sombra dura del PointLight sobre miles de ramas
+          // finas pinta manchones negros — la sombra la da el decal del suelo
+          grupo.add(m); bandas.push(m);
+          aPos = []; aUv = []; aIdx = []; aNor = [];
+        }
+      };
+      // prisma cuadrado que se afila de r0 a r1 entre dos puntos (4 caras con
+      // normal explícita vía quad(); sin tapas — la punta es demasiado fina
+      // para verse hueca)
+      const rama = (a, b, r0, r1) => {
+        const ax = b[0] - a[0], ay = b[1] - a[1], az = b[2] - a[2];
+        let ux = -az, uz = ax, ul = Math.hypot(ux, uz);
+        if (ul < 1e-4) { ux = 1; uz = 0; ul = 1; }
+        ux /= ul; uz /= ul;                                  // u ⊥ eje, horizontal
+        let vx = ay * uz, vy = az * ux - ax * uz, vz = -ay * ux;
+        const vl = Math.hypot(vx, vy, vz) || 1;
+        vx /= vl; vy /= vl; vz /= vl;                        // v = eje × u
+        const dirs = [[ux, 0, uz], [vx, vy, vz], [-ux, 0, -uz], [-vx, -vy, -vz]];
+        for (let i = 0; i < 4; i++) {
+          const d0 = dirs[i], d1 = dirs[(i + 1) % 4];
+          quad(aPos, aUv, aIdx, [
+            [a[0] + d0[0] * r0, a[1] + d0[1] * r0, a[2] + d0[2] * r0],
+            [a[0] + d1[0] * r0, a[1] + d1[1] * r0, a[2] + d1[2] * r0],
+            [b[0] + d1[0] * r1, b[1] + d1[1] * r1, b[2] + d1[2] * r1],
+            [b[0] + d0[0] * r1, b[1] + d0[1] * r1, b[2] + d0[2] * r1],
+          ], [0, 0, 1, 1], aNor);
+        }
+      };
+      // crecimiento recursivo: cada rama se quiebra en 1-3 hijas más finas y
+      // cortas con azimut aleatorio — la silueta nudosa del árbol seco del 2D
+      const crecer = (a, dir, len, r, prof, k) => {
+        const b = [a[0] + dir[0] * len, a[1] + dir[1] * len, a[2] + dir[2] * len];
+        rama(a, b, r, r * (prof ? 0.68 : 0.25));
+        if (!prof || r < 0.02) return;
+        const nHijas = prof >= 3 ? 3 : seededUnit(k + ':n') < 0.5 ? 2 : 1;
+        for (let i = 0; i < nHijas; i++) {
+          const azi = seededUnit(k + ':a' + i) * Math.PI * 2;
+          const abre = 0.45 + seededUnit(k + ':o' + i) * 0.55;
+          const dx = dir[0] + Math.cos(azi) * abre;
+          const dy = dir[1] * 0.75 + 0.3;                    // tienden hacia arriba
+          const dz = dir[2] + Math.sin(azi) * abre;
+          const dl = Math.hypot(dx, dy, dz) || 1;
+          crecer(b, [dx / dl, dy / dl, dz / dl],
+            len * (0.6 + seededUnit(k + ':l' + i) * 0.2),
+            r * (0.5 + seededUnit(k + ':r' + i) * 0.16),
+            prof - 1, k + ':' + i);
+        }
+      };
+      for (let y = 0; y < g.h; y++) {
+        for (let x = 0; x < g.w; x++) {
+          if (!esWall(x, y)) continue;
+          const k = `${world.runSeed}:${world.ventanaN || 0}:arbol:${x}:${y}`;
+          const bx = x + 0.5 + (seededUnit(k + ':jx') - 0.5) * 0.32;
+          const bz = y + 0.5 + (seededUnit(k + ':jy') - 0.5) * 0.32;
+          const rs = 0.4 + seededUnit(k + ':s') * 0.14;
+          quad(sPos, sUv, sIdx,
+            [[bx - rs, 0.015, bz + rs], [bx + rs, 0.015, bz + rs],
+             [bx + rs, 0.015, bz - rs], [bx - rs, 0.015, bz - rs]],
+            [0, 0, 1, 1], sNor);
+          // en el interior de una arboleda densa apenas se ve: versión simple
+          const denso = esWall(x, y - 1) && esWall(x, y + 1) && esWall(x - 1, y) && esWall(x + 1, y);
+          const lx = (seededUnit(k + ':lx') - 0.5) * 0.36;   // tronco algo inclinado
+          const lz = (seededUnit(k + ':lz') - 0.5) * 0.36;
+          const dl = Math.hypot(lx, 1, lz);
+          crecer([bx, 0, bz], [lx / dl, 1 / dl, lz / dl],
+            0.7 + seededUnit(k + ':h') * 0.35,
+            0.085 + seededUnit(k + ':r') * 0.05,
+            denso ? 2 : 3, k);
+        }
+        if ((y & 7) === 7) { flushArboles(); yield; }
+      }
+      flushArboles();
     } else {
-      // bosque/exterior: árboles y rocas como billboards verticales
-      const canvas = tiles.wallStyle === 'arbol' ? tiles.arbol : tiles.roca;
+      // exterior: rocas como billboards verticales
+      const canvas = tiles.roca;
       const mat = new THREE.SpriteMaterial({ map: tex(canvas, 'muro-organico'), transparent: true });
       for (let y = 0; y < g.h; y++) {
         for (let x = 0; x < g.w; x++) {
           if (!esWall(x, y)) continue;
           const s = new THREE.Sprite(mat);
-          const escala = tiles.wallStyle === 'arbol' ? 1.5 : 1.25;
+          const escala = 1.25;
           s.scale.set(escala, escala * (canvas.height / canvas.width), 1);
           s.position.set(x + 0.5, escala * 0.48, y + 0.5);
           grupo.add(s);
@@ -860,6 +1033,7 @@
         edificio: { p: 'edificio', w: 0.95, h: 1.4, y: 0.7, grosor: 0.12, ladoCol: 0x2c333d, ladoEst: 'metal' },
         ventana: { p: 'ventana', w: 0.9, h: 1.3, y: 0.75, grosor: 0.07, ladoCol: 0x2a2a2e, ladoEst: 'metal' },
         puerta: { p: 'puerta', w: 0.92, h: 1.36, y: 0.68, grosor: 0.08, ladoCol: 0x241c14, ladoEst: 'madera' },
+        emergencia: { p: 'emergencia', w: 0.92, h: 1.36, y: 0.68, grosor: 0.08, ladoCol: 0x181210, ladoEst: 'metal' },
       };
       const spec = SPEC[rit] ?? SPEC[estilo] ?? SPEC.puerta;
       const t2 = pintado('p-' + spec.p + col, () => PINTORES[spec.p](col));
@@ -873,6 +1047,13 @@
       m.position.set(ex.x + 0.5, spec.y, paredNorte ? ex.y + spec.grosor / 2 + 0.01 : ex.y + 0.5);
       m.castShadow = true;
       grupo.add(m);
+      // baliza roja de emergencia: la única luz roja fija del juego, para que
+      // esta salida se reconozca desde lejos frente a cualquier otra puerta
+      if (rit === 'emergencia') {
+        const baliza = new THREE.PointLight(0xff2020, 6, 4, 2);
+        baliza.position.set(ex.x + 0.5, spec.y + spec.h / 2 + 0.1, paredNorte ? ex.y + 0.6 : ex.y + 0.5);
+        grupo.add(baliza);
+      }
     });
     yield;
 
@@ -1044,14 +1225,22 @@
     if (window.Atmos3D) Atmos3D.buildLevel(world, staticGroup);
 
     const pal = world.level.paleta;
-    const fondo = new THREE.Color(pal.fondo);
+    const fondo = capFondo(new THREE.Color(pal.fondo));
     scene.background = fondo;
     fogBase = 0.08 + world.level.oscuridad * 0.16;
     scene.fog = new THREE.FogExp2(fondo, fogBase);
     const esLevel0 = world.level.id === 'level-0';
-    amb.intensity = esLevel0 ? 0.22 : Math.max(0.12, 0.55 - world.level.oscuridad * 0.4);
-    dlight.intensity = esLevel0 ? 0.14 : 0.35;
-    renderer.toneMappingExposure = esLevel0 ? 0.96 : 1.15;
+    // Paletas casi blancas (poolrooms, nieve, hospitales): la misma energía de
+    // luz que en un nivel normal SATURA el albedo claro y quema el centro de
+    // la imagen. nivelClaro ∈ [0,1] mide cuánto se pasa de claro el suelo y
+    // rebaja proporcionalmente ambiente y exposición (0 en niveles normales).
+    const cSuelo = new THREE.Color(pal.suelo);
+    const lumSuelo = 0.2126 * cSuelo.r + 0.7152 * cSuelo.g + 0.0722 * cSuelo.b;
+    nivelClaro = Math.max(0, Math.min(1, (lumSuelo - 0.55) / 0.35));
+    amb.intensity = esLevel0 ? 0.22
+      : Math.max(0.12, 0.55 - world.level.oscuridad * 0.4) * (1 - 0.35 * nivelClaro);
+    dlight.intensity = esLevel0 ? 0.14 : 0.35 * (1 - 0.3 * nivelClaro);
+    renderer.toneMappingExposure = esLevel0 ? 0.96 : 1.15 - 0.25 * nivelClaro;
     plight.color = new THREE.Color(pal.luz);
     plight.distance = (world.visionActual() + 3) * 1.6;
     plight.castShadow = !esLevel0;
@@ -1068,6 +1257,15 @@
     } else if (viejo) {
       disposeGrupo(viejo, true);
     }
+  }
+
+  // fondos casi blancos (poolrooms): la niebla acumulada contra un fondo de
+  // luminancia ~1 quemaba el horizonte a blanco puro — se capa la luminancia
+  // del color conservando su tono (solo muerde en fondos MUY claros) (v30.2)
+  function capFondo(c) {
+    const l = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+    if (l > 0.8) c.multiplyScalar(0.8 / l);
+    return c;
   }
 
   // termina de golpe un revelado a medias (llega otro ciclo de rebuild)
@@ -1087,18 +1285,27 @@
       const it = world.map.items[i];
       if (it.taken) continue;
       const c = Render.itemToCanvas(it.id, world.data.objects);
-      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex(c, 'item-' + it.id), transparent: true }));
+      const sv = window.Sprites?.version ? Sprites.version() : 0;
+      const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex(c, 'item-' + it.id + '-' + sv), transparent: true }));
       s.scale.set(0.55, 0.6, 1);
       s.position.set(it.x + 0.5, 0.22, it.y + 0.5);
       actorGroup.add(s);
       itemSprites.set(i, s);
     }
     itemsVersionVista = world.itemsVersion || 0;
+    spritesVersionVista = window.Sprites?.version ? Sprites.version() : 0;
   }
 
   // centrado inmediato de cámara al entrar en un nivel nuevo
   function centrarCamara(world) {
     const p = world.player;
+    if (world.espectador) {
+      // v30: espectando el cambio de nivel arranca ya en cenital, sin viaje
+      camYaw = 0; yawLibre = null;
+      camera.position.set(p.rx + 0.5, espAlt, p.ry + 0.5 + espAlt * 0.33);
+      frame._look = new THREE.Vector3(p.rx + 0.5, 0.4, p.ry + 0.5);
+      return;
+    }
     if (CAM_MODO === 'tercera') {
       if (world.online) {
         // online p.rot es θ continuo; la cámara arranca a la espalda y de
@@ -1131,6 +1338,18 @@
     if (texCache.has(key)) return texCache.get(key);
     const c = Sprites.get(glyph, frame, flip);
     return c ? tex(c, key) : null;
+  }
+
+  // `needsUpdate` obliga a Three.js a revalidar el material. Antes se marcaba
+  // en cada frame para el jugador, las entidades y cada jugador remoto, aunque
+  // la textura siguiera siendo la misma. En salas concurridas eso multiplica
+  // el trabajo de GPU sin aportar ningún cambio visual.
+  function setSpriteTexture(sprite, texture) {
+    const material = sprite.material;
+    if (material.map === texture) return;
+    const cambiaUsoMapa = !!material.map !== !!texture;
+    material.map = texture;
+    if (cambiaUsoMapa) material.needsUpdate = true;
   }
 
   function entVisible(world, e) {
@@ -1180,11 +1399,17 @@
       cercanas.splice(i, 0, { ...p, d2 });
       if (cercanas.length > ceilingLights.length) cercanas.pop();
     }
+    const m = world.map.manila;
+    const pal = world.level.paleta;
     ceilingLights.forEach((l, i) => {
       const p = cercanas[i];
       if (!p) { l.intensity = 0; l.visible = false; return; }
       l.visible = true;
       l.position.set(p.x, WALL_H - 0.12, p.z);
+      // Sala Manila: sus fluorescentes viran a un naranja tenue — la calma
+      // que precede a perder la noción del tiempo ahí dentro
+      const enManila = m && p.x >= m.x && p.x < m.x + m.w && p.z >= m.y && p.z < m.y + m.h;
+      l.color.set(enManila ? 0xff8c40 : pal.luz);
       const falla = p.group === flkGrupo && !flkOn;
       const objetivo = (0.82 - 0.12 * fase0) * (falla ? 0.05 : 1);
       l.intensity += (objetivo - l.intensity) * 0.22;
@@ -1271,7 +1496,8 @@
       }
     }
     // items del suelo: rehacer si la lógica los cambió (tirar/arrojar objetos)
-    if ((world.itemsVersion || 0) !== itemsVersionVista) rebuildItems(world);
+    if ((world.itemsVersion || 0) !== itemsVersionVista ||
+        (window.Sprites?.version && Sprites.version() !== spritesVersionVista)) rebuildItems(world);
 
     const p = world.player;
     const px = p.rx + 0.5, pz = p.ry + 0.5;
@@ -1280,13 +1506,26 @@
       playerSprite.scale.set(1, SPRITE_H, 1);
       actorGroup.add(playerSprite);
     }
+    if (!playerMaskSprite) {
+      // capa de la máscara de gas: billboard aparte pegado al del cuerpo, sin
+      // escribir en el depth buffer para que nunca compita con él (v25.1)
+      playerMaskSprite = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthWrite: false }));
+      playerMaskSprite.scale.set(1, SPRITE_H, 1);
+      playerMaskSprite.renderOrder = 1;
+      actorGroup.add(playerMaskSprite);
+    }
 
     // jugador: orientación del sprite RELATIVA a la cámara
     let sid, sflip = false;
     if (CAM_MODO === 'tercera') {
       if (world.online) {
-        // v25: cámara libre — el sprite muestra la cara que toque
-        const rel = ((Math.round(((p.rot || 0) - (-camYaw)) / (Math.PI / 2)) % 4) + 4) % 4;
+        // v25: cámara libre — el sprite muestra la cara que toque.
+        // usa p.rotSprite (última tecla sostenida, main.js) en vez de p.rot
+        // (vector combinado de movimiento real): con dos teclas a la vez
+        // p.rot caía justo en el borde entre dos encuadres y parpadeaba.
+        // La cuantización pasa por Otros.dir4 (empates a 45° simétricos).
+        const rotVisible = p.rotSprite !== undefined ? p.rotSprite : (p.rot || 0);
+        const rel = Otros.dir4(rotVisible + camYaw);
         if (rel === 0) sid = 'player_up';
         else if (rel === 2) sid = 'player_down';
         else { sid = 'player_side'; sflip = rel === 3; }
@@ -1307,13 +1546,23 @@
       else if (svy < 0) sid = 'player_up';
       else { sid = 'player_side'; sflip = svx < 0; }
     }
+    const maskId = sid.replace('player_', 'mascara_'); // antes de sumar _herido
     // malherido: el propio sprite lo cuenta (sangre y palidez)
     if (p.salud < 35 && Sprites.tiene(sid + '_herido')) sid += '_herido';
     const pframe = world.moving ? Math.floor(t / 150) % Sprites.frameCount(sid) : 0;
-    playerSprite.material.map = spriteTexFlip(sid, pframe, sflip);
-    playerSprite.material.needsUpdate = true;
+    setSpriteTexture(playerSprite, spriteTexFlip(sid, pframe, sflip));
     playerSprite.position.set(px, SPRITE_H / 2 + 0.02, pz);
-    playerSprite.visible = !world.escondido; // dentro de un mueble no se te ve
+    // dentro de un mueble no se te ve; el espectador (v30) es un fantasma
+    playerSprite.visible = !world.escondido && !world.espectador;
+
+    // capa de la máscara de gas (PUESTA en la ranura de cara): PNG opcional
+    const conMascara = world.equipado && world.equipado('mascara_gas') && Sprites.tiene(maskId);
+    playerMaskSprite.visible = conMascara && !world.escondido && !world.espectador;
+    if (conMascara) {
+      const mframe = pframe % Sprites.frameCount(maskId);
+      setSpriteTexture(playerMaskSprite, spriteTexFlip(maskId, mframe, sflip));
+      playerMaskSprite.position.copy(playerSprite.position);
+    }
 
     // entidades (crear bajo demanda, ocultar si no visibles)
     for (const e of world.entities) {
@@ -1343,8 +1592,7 @@
       if (!visible) continue;
       const frame2 = Math.floor(t / 280) % Sprites.frameCount(e.def.glyph);
       const tx = spriteTex(e.def.glyph, frame2) || entCanvas(e, frame2);
-      s.material.map = tx;
-      s.material.needsUpdate = true;
+      setSpriteTexture(s, tx);
       // embestida de ataque
       let ox = 0, oz = 0;
       if (e._atkT !== undefined) {
@@ -1379,7 +1627,11 @@
         : ((4 - camRot) % 4) * Math.PI / 2;
       for (const o of world.otros) {
         vivos.add(o.id);
-        if (o.escondido) { const sE = otrosSprites.get(o.id); if (sE) sE.visible = false; continue; }
+        if (o.escondido || o._crowdVisible === false) {
+          const sE = otrosSprites.get(o.id);
+          if (sE) sE.visible = false;
+          continue;
+        }
         let s = otrosSprites.get(o.id);
         if (!s) {
           s = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true }));
@@ -1391,8 +1643,7 @@
         const f2 = (Math.abs(o.rx - o.x) + Math.abs(o.ry - o.y) > 0.03)
           ? Math.floor(t / 150) % Sprites.frameCount(sid2) : 0;
         s.visible = true;
-        s.material.map = spriteTexFlip(sid2, f2, flip2);
-        s.material.needsUpdate = true;
+        setSpriteTexture(s, spriteTexFlip(sid2, f2, flip2));
         s.position.set(o.rx + 0.5, SPRITE_H / 2 + 0.02, o.ry + 0.5);
       }
       for (const [id, s] of otrosSprites)
@@ -1415,10 +1666,53 @@
       renderer.toneMappingExposure = 0.96 - 0.05 * fase0;
     }
 
-    // luz del jugador con flicker fluorescente
+    // Cordura baja (v26.1, adaptado del PR #17): la niebla y el fondo se
+    // tiñen de púrpura/rojo oscuro y el bloom pulsa y baja de umbral —
+    // cuanto más cerca de 0, más se acerca el fluorescente al horror.
+    // baseFondo se recalcula ENTERO cada frame desde la paleta real del
+    // nivel (nunca desde scene.background ya mutado): si no, el tinte se
+    // realimentaría sobre sí mismo y jamás se recuperaría al subir la cordura.
+    const cordura = p.cordura ?? 100;
+    if (scene.fog && !window.NOFX) {
+      const baseFondo = capFondo(new THREE.Color(world.level.paleta.fondo));
+      if (world.level.id === 'level-0') {
+        baseFondo.setRGB(0.051 + 0.015 * fase0, 0.043 + 0.025 * fase0, 0.02 + 0.04 * fase0);
+      }
+      if (cordura < 40) {
+        const sc = (40 - cordura) / 40;
+        const locuraFondo = new THREE.Color(0x13010b);
+        baseFondo.lerp(locuraFondo, sc * 0.85);
+      }
+      scene.background.copy(baseFondo);
+      scene.fog.color.copy(baseFondo);
+    }
+    if (bloomPass && !window.NOFX) {
+      // BASE 0.82 = el umbral de DISEÑO del constructor (v14: solo florecen
+      // los emisivos casi blancos — fluorescentes, boquetes, rótulo EXIT).
+      // La adaptación del PR #17 (v26.2) escribía aquí 0.4 cada frame — ese
+      // 0.4 era el RADIO del constructor, no el umbral — y desde entonces
+      // cualquier pared clara floraba: niveles enteros en blanco nuclear.
+      let targetBloom = 0.55, targetThreshold = 0.82;
+      if (cordura < 40) {
+        const sc = (40 - cordura) / 40;
+        const pulso = Math.sin(t * 0.003) * 0.15 * sc;
+        targetBloom = 0.55 + sc * 0.65 + pulso;
+        targetThreshold = 0.82 - sc * 0.3; // con locura baja hasta 0.52: brilla, no ciega
+      }
+      bloomPass.strength = targetBloom;
+      bloomPass.threshold = targetThreshold;
+    }
+
+    // luz del jugador con flicker fluorescente (se intensifica con cordura baja)
     let flicker = 1;
-    if (!REDUCE_FLICKER && Math.random() < 0.012) flicker = 0.72;
-    const luzJugador = world.level.id === 'level-0' ? 0.72 : 1.7;
+    if (!REDUCE_FLICKER) {
+      if (cordura < 45 && Math.random() < 0.03 + (45 - cordura) * 0.005) {
+        flicker = Math.random() < 0.35 ? 0.08 : 0.55; // parpadeo severo de locura
+      } else if (Math.random() < 0.012) flicker = 0.72;
+    }
+    // en paletas casi blancas la luz del jugador quema un disco alrededor
+    // (albedo claro × 1.7 satura el ACES): se normaliza con nivelClaro
+    const luzJugador = world.level.id === 'level-0' ? 0.72 : 1.7 * (1 - 0.5 * nivelClaro);
     plight.intensity = plight.intensity * 0.85 + (luzJugador * flicker) * 0.15;
     plight.position.set(px, 1.6, pz);
     plight.distance = (world.visionActual() + 3) * (p.luz ? 2.4 : 1.6);
@@ -1428,7 +1722,11 @@
     // solo) — antes usaba p.dir, que online nunca cambia, y el cono se quedaba
     // clavado mirando al sur como una luz fantasma.
     const luzOn = p.luz && !world.luzBloqueada;
-    spot.intensity += ((luzOn ? 2.4 : 0) - spot.intensity) * 0.12;
+    let spotFlicker = 1;
+    if (!REDUCE_FLICKER && cordura < 45 && Math.random() < 0.02 + (45 - cordura) * 0.004) {
+      spotFlicker = Math.random() < 0.4 ? 0.1 : 0.6; // parpadeo de linterna por locura
+    }
+    spot.intensity += (((luzOn ? 2.4 : 0) * spotFlicker) - spot.intensity) * 0.12;
     if (spot.intensity > 0.01) {
       let fx2 = 0, fz2 = 1;
       if (world.online) {
@@ -1442,18 +1740,29 @@
       spot.target.position.set(px + fx2 * 3.5, 0.2, pz + fz2 * 3.5);
       spot.target.updateMatrixWorld();
     }
-    if (scene.fog)
-      scene.fog.density += ((luzOn ? fogBase * 0.45 : fogBase) - scene.fog.density) * 0.06;
+    if (scene.fog) {
+      let targetFogBase = fogBase;
+      if (cordura < 50) {
+        const sc = (50 - cordura) / 50;
+        targetFogBase = fogBase * (1 + sc * 0.9); // hasta +90% de niebla (claustrofobia)
+      }
+      // espectador (v30): desde 14 de altura la niebla normal funde el suelo
+      // a negro — casi fuera, que el guardián vea el plano entero
+      if (world.espectador) targetFogBase = Math.min(fogBase, 0.015);
+      scene.fog.density += ((luzOn ? targetFogBase * 0.45 : targetFogBase) - scene.fog.density) * 0.06;
+    }
 
     // luminarias cercanas + polvo en suspensión
     if (window.Atmos3D) Atmos3D.frame(world, t, px, pz, luzOn);
 
     // Los paneles están repartidos en grupos sembrados. Cada fallo elige uno:
-    // parpadea una fracción del techo, nunca todos los fluorescentes a la vez.
+    // parpadea una fracción del techo, nunca todos los fluorescentes a la vez
+    // (la probabilidad sube con la cordura baja).
     if (panelMats.some(Boolean) && !window.NOFX && !REDUCE_FLICKER) {
       const baseCenital = world.level.id === 'level-0' ? 0.14 - 0.025 * fase0 : 0.35;
       if (!flkHasta) {
-        if (Math.random() < 0.0006) {
+        const probFlicker = cordura < 50 ? 0.0006 + (50 - cordura) * 0.0012 : 0.0006;
+        if (Math.random() < probFlicker) {
           flkHasta = t + 600 + Math.random() * 1000;
           flkNext = 0;
           const activos = panelMats.map((m, i) => m ? i : -1).filter((i) => i >= 0);
@@ -1480,21 +1789,91 @@
     }
     actualizarLucesTecho(world, px, pz, fase0);
 
-    if (CAM_MODO === 'tercera') {
+    // ---------- modo espectador (v30): casa de muñecas ----------
+    // el techo y sus fluorescentes taparían TODO desde una cámara cenital:
+    // sus materiales se apagan mientras dure (se re-aplica cada frame porque
+    // aplicarEstatica los recrea al cambiar de nivel); luz ambiente de apoyo
+    {
+      const espectando = !!world.espectador;
+      if (transitionMats && transitionMats.ceiling) transitionMats.ceiling.visible = !espectando;
+      for (const m of panelMats) if (m) m.visible = !espectando;
+      if (espectando) amb.intensity = Math.max(amb.intensity, 0.55);
+    }
+
+    if (world.espectador) {
+      // --- CÁMARA CENITAL de espectador (v30): sobre el objetivo, con una
+      // inclinación leve para que los billboards sigan leyéndose; la rueda
+      // del ratón ajusta la altura (main.js escribe Render3D.espAlt) ---
+      const alt = espAlt;
+      camera.position.lerp(new THREE.Vector3(px, alt, pz + alt * 0.33), 0.1);
+      frame._look = frame._look || new THREE.Vector3(px, 0.4, pz);
+      frame._look.lerp(new THREE.Vector3(px, 0.4, pz), 0.14);
+      camera.lookAt(frame._look);
+    } else if (CAM_MODO === 'tercera') {
       // --- CÁMARA 3ª PERSONA: pegada a la espalda, baja, inmersiva ---
       const rot = p.rot ?? 2;
       if (world.moving) camBobT += 0.13;
       const bob = Math.sin(camBobT) * TP.bob * (world.moving ? 1 : 0.12);
+      // v30.7: mientras el RATÓN orbita (point-and-look) la cámara responde
+      // 1:1, SIN suavizado — el retardo de goma venía de encadenar tres lerps
+      // por-frame (yaw 0.55 + posición 0.1 + mirada 0.12), encima dependientes
+      // de los FPS. El resto de movimientos siguen suaves, pero corregidos por
+      // dt para que a 30 fps se sientan igual que a 144.
+      const ahoraCam = performance.now();
+      const dtCam = Math.min(0.1, Math.max(0.005, (ahoraCam - (ultTCam || ahoraCam)) / 1000));
+      ultTCam = ahoraCam;
+      const orbitando = world.online && (ahoraCam - ultimoOrbitoT) < 150;
+      const corrDt = (f) => 1 - Math.pow(1 - Math.min(0.95, f), dtCam * 60);
       // v25 online: cámara LIBRE estilo Roblox — el ratón fija el yaw
       // (yawLibre) y el personaje se mueve relativo a la cámara; sin arrastrar
       // aún, la cámara se queda donde está. Solo (offline): sigue a la espalda.
       let yawObjetivo;
-      if (world.online) yawObjetivo = yawLibre === null ? camYaw : yawLibre;
-      else { const [fx3, fz3] = ROT_VEC[rot]; yawObjetivo = Math.atan2(-fx3, -fz3); }
+      let factorSuavidad = world.online ? 0.55 : 0.12;
+      if (world.online) {
+        if (window.OPTS && window.OPTS.camaraModo === 'bloqueada') {
+          // Cámara bloqueada (Seguimiento)
+          const segVal = window.OPTS.camaraSeguimiento !== undefined ? window.OPTS.camaraSeguimiento : 8;
+          const yaOrbitoHacePoco = (performance.now() - ultimoOrbitoT) < 1000;
+
+          // Se considera que camina hacia adelante si se mueve y inputY es negativo (W, W+A, W+D)
+          const caminaAdelante = world.moving && p.inputY < 0;
+
+          if (caminaAdelante) {
+            p.camaraDebeAlinear = true;
+          }
+
+          // Si camina hacia adelante, se alinea inmediatamente. 
+          // Si está quieto pero quedó con realineación pendiente, se alinea suavemente siempre que no haya orbitado de forma manual recientemente.
+          const debeAlinearAhora = caminaAdelante || (p.camaraDebeAlinear && !yaOrbitoHacePoco);
+
+          if (debeAlinearAhora) {
+            yawObjetivo = -p.rot;
+            yawLibre = yawObjetivo;
+            factorSuavidad = segVal / 100;
+          } else {
+            yawObjetivo = yawLibre === null ? camYaw : yawLibre;
+          }
+        } else {
+          yawObjetivo = yawLibre === null ? camYaw : yawLibre;
+        }
+      } else {
+        const [fx3, fz3] = ROT_VEC[rot];
+        yawObjetivo = Math.atan2(-fx3, -fz3);
+      }
       let dyaw = yawObjetivo - camYaw;
       while (dyaw > Math.PI) dyaw -= Math.PI * 2;
       while (dyaw < -Math.PI) dyaw += Math.PI * 2;
-      camYaw += dyaw * (world.online ? 0.55 : 0.12); // el ratón pide respuesta directa
+
+      // Si está realineando y ya se alineó casi del todo, apagar el flag para dejar la cámara libre
+      if (window.OPTS && window.OPTS.camaraModo === 'bloqueada' && p.camaraDebeAlinear) {
+        if (!world.moving && Math.abs(dyaw) < 0.01) {
+          p.camaraDebeAlinear = false;
+        }
+      }
+
+      // ratón orbitando = respuesta DIRECTA; lo demás, suave e independiente de FPS
+      if (orbitando) camYaw = yawObjetivo;
+      else camYaw += dyaw * corrDt(factorSuavidad);
       const ox = Math.sin(camYaw) * TP.dist;
       const oz = Math.cos(camYaw) * TP.dist;
       let target = new THREE.Vector3(px + ox, TP.alto + bob, pz + oz);
@@ -1512,13 +1891,20 @@
           target.y = Math.min(target.y, TP.alto + bob);
         }
       }
-      camera.position.lerp(target, TP.suavidad);
+      // v30.10: online la TRASLACIÓN es rígida SIEMPRE (estilo Roblox) — la
+      // física del jugador ya es continua y no necesita amortiguador. El lerp
+      // de posición solo-al-no-orbitar conmutaba entre 0 y ~0.7 tiles de
+      // retraso cada vez que tocabas/soltabas el ratón andando: latigazo de
+      // ~70 px por frame (medido). El suavizado queda para el yaw (continuo)
+      // y para el modo offline por turnos, cuyos pasos discretos sí lo piden.
+      if (world.online) camera.position.copy(target);
+      else camera.position.lerp(target, corrDt(TP.suavidad));
       // mira hacia delante (según la órbita actual: giro suave sin bandazos)
       frame._look = frame._look || new THREE.Vector3(px, TP.lookY, pz);
-      frame._look.lerp(
-        new THREE.Vector3(px - Math.sin(camYaw) * TP.lookAhead, TP.lookY, pz - Math.cos(camYaw) * TP.lookAhead),
-        0.12
-      );
+      const lookObjetivo = new THREE.Vector3(
+        px - Math.sin(camYaw) * TP.lookAhead, TP.lookY, pz - Math.cos(camYaw) * TP.lookAhead);
+      if (world.online) frame._look.copy(lookObjetivo);
+      else frame._look.lerp(lookObjetivo, corrDt(0.12));
       camera.lookAt(frame._look);
       // si la cámara queda pegada (muro a la espalda), el personaje se desvanece
       // en vez de tapar media pantalla
@@ -1570,6 +1956,21 @@
       camera.lookAt(frame._look);
     }
 
+    // Temblor de cámara por pánico con cordura muy baja
+    if (cordura < 30 && !REDUCE_FLICKER) {
+      const sc = (30 - cordura) / 30;
+      const shakeAmp = 0.018 * sc;
+      camera.position.x += (Math.random() - 0.5) * shakeAmp;
+      camera.position.y += (Math.random() - 0.5) * shakeAmp;
+      camera.position.z += (Math.random() - 0.5) * shakeAmp;
+      if (frame._look) {
+        frame._look.x += (Math.random() - 0.5) * shakeAmp * 1.5;
+        frame._look.y += (Math.random() - 0.5) * shakeAmp * 1.5;
+        frame._look.z += (Math.random() - 0.5) * shakeAmp * 1.5;
+        camera.lookAt(frame._look);
+      }
+    }
+
     if (composer && !window.NOFX) {
       try { composer.render(); }
       catch (e) { console.warn('Postpro caído, render directo:', e); composer = null; renderer.render(scene, camera); }
@@ -1592,7 +1993,10 @@
 
   function project(wx, wy) {
     const v = new THREE.Vector3(wx + 0.5, 0.8, wy + 0.5).project(camera);
-    return [(v.x * 0.5 + 0.5) * W, (-v.y * 0.5 + 0.5) * H];
+    // v.z > 1 tras project(): el punto queda detrás de la cámara (la
+    // división de perspectiva por w negativa lo puede devolver dentro del
+    // rango de pantalla en vez de fuera) — quien llama debe ignorarlo
+    return [(v.x * 0.5 + 0.5) * W, (-v.y * 0.5 + 0.5) * H, v.z > 1];
   }
 
   function drawOverlay(world, t) {
@@ -1649,7 +2053,13 @@
     get rot() { return camRot; },
     // v25 — cámara libre (online): el ratón orbita; el movimiento es relativo a ella
     get yaw() { return camYaw; },
-    orbita(d) { yawLibre = (yawLibre === null ? camYaw : yawLibre) + d; },
+    orbita(d) {
+      yawLibre = (yawLibre === null ? camYaw : yawLibre) + d;
+      ultimoOrbitoT = performance.now();
+    },
+    // v30 — altura de la cámara cenital de espectador (rueda del ratón)
+    get espAlt() { return espAlt; },
+    set espAlt(v) { espAlt = Math.max(5, Math.min(26, v)); },
     // v25 — pantalla completa real: relanza el render a la resolución nueva
     resize(w, h) {
       if (!renderer) return;

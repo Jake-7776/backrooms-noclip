@@ -223,6 +223,14 @@
     '............', '...p.p.p....', '..pppppp....', '..pppppp.p..',
     '..pppppppp..', '..pppppppp..', '..PpPpPp....', '...ppppp....',
     '...ppppp....', '...mmmmm....', '...mmmmm....', '............'] };
+  D.mando = { pal: { c: '#9a9482', d: '#14120d', r: '#c94a3a', b: '#4a80a8' }, m: [
+    '............', '............', '..cccccccc..', '.cccccccccc.',
+    '.cc.d..b..c.', '.cd.d.c.r.c.', '.cc.d.....c.', '.ccc....ccc.',
+    '..c......c..', '............', '............', '............'] };
+  D.nota = { pal: { n: '#d9c66e', w: '#efe8d0' }, m: [
+    '....nnnnnnnn', '....nnnnnnnw', '....n.....n.', '....n.....n.',
+    '....n.....n.', '....n.....n.', '..nnn...nnn.', '.nnnn..nnnn.',
+    '.nnnn..nnnn.', '..nn....nn..', '............', '............'] };
   D.pergamino = { pal: { p: '#d8c9a0', P: '#a8946a', l: '#6a5c40' }, m: [
     '............', '..PPPPPPPP..', '..Pppppppp..', '..pllllllp..',
     '..pppppppp..', '..plllllpp..', '..pppppppp..', '..pllllllp..',
@@ -239,21 +247,37 @@
     '📖': 'libro', '🚪': 'puerta', '⭐': 'estrella', '☠': 'calavera',
     '〰': 'onda', '♾': 'infinito', '❄': 'frio', '●': 'punto', '☔': 'paraguas',
     '🍖': 'carne', '👁': 'ojo', '👀': 'ojos', '⌀': 'diametro', '🕰': 'reloj',
-    '🪶': 'pluma', '∅': 'vacio', '🪞': 'espejo', '🌫': 'niebla', '🔪': 'cuchillo',
+    '🪶': 'pluma', '∅': 'vacio', '🪞': 'espejo', '🌫': 'niebla', '🔪': 'cuchillo', '🎵': 'nota',
   };
 
-  const cache = {}, urls = {};
+  const cache = {}, urls = {}, overrides = {};
   function canvasOf(id) {
     if (!D[id]) return null;
     if (!cache[id]) cache[id] = rasterize(D[id].pal, D[id].m);
     return cache[id];
   }
   function url(id) {
+    if (overrides[id]) return overrides[id];
     if (!urls[id]) {
       const c = canvasOf(id);
       urls[id] = c ? c.toDataURL() : '';
     }
     return urls[id];
+  }
+  // overrides PNG opcionales en game/assets/icons/<id>.png (v25.2): mismo
+  // espíritu que Sprites.tryOverrides, pero un solo cuadrado (sin frames).
+  // Se piden al arrancar (main.js), antes de que se pinte ningún panel, así
+  // que en la práctica ya están listos para cuando el jugador abre algo.
+  // v30.5: solo se cargan los que EXISTEN según el manifiesto de assets
+  // (regenerar con `node pipeline/build-assets-manifest.js`) — sin 404.
+  function tryOverrides(ids) {
+    const M = (window.ASSETS_MANIFEST || {}).iconos || {};
+    for (const id of ids) {
+      if (overrides[id] || !M[id]) continue;
+      const im = new Image();
+      im.onload = () => { overrides[id] = M[id]; };
+      im.src = M[id];
+    }
   }
   function img(id, size = 16, flip = false) {
     const im = document.createElement('img');
@@ -305,5 +329,8 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
 
-  window.Icons = { url, img, set, deEmoji, has: (id) => !!D[id] };
+  window.Icons = {
+    url, img, set, deEmoji, tryOverrides, has: (id) => !!D[id],
+    list: () => Object.keys(D),
+  };
 })();

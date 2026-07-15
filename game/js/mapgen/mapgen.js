@@ -87,7 +87,7 @@
          (walkable(at(g, x, y - 1)) && walkable(at(g, x, y + 1)))))
         if (rng.chance(0.4)) set(g, x, y, T.SUELO);
     }
-    return g;
+    return { grid: g, rects };
   }
 
   // Espacio abierto con pilares (Level 1)
@@ -135,7 +135,58 @@
     return g;
   }
 
-  // Habitaciones BSP + corredores (hospitales, oficinas, hoteles)
+  // Ala de hospital (Level 14, 16, 188): varias alas horizontales APILADAS
+  // (según la altura disponible) unidas por un pasillo vertical, con
+  // habitaciones UNIFORMES en "peine" a ambos lados de cada ala (alguna más
+  // grande: quirófano/almacén) — más rígido y repetitivo que el BSP orgánico
+  // de oficinas, como la planta real de un edificio. El ala central aloja el
+  // puesto de enfermería, donde confluye el pasillo vertical.
+  function genHospital(w, h, rng) {
+    const g = grid(w, h, T.PARED);
+    const room = (x, y, rw, rh) => {
+      for (let yy = Math.max(1, y); yy < Math.min(h - 1, y + rh); yy++)
+        for (let xx = Math.max(1, x); xx < Math.min(w - 1, x + rw); xx++) set(g, xx, yy, T.SUELO);
+    };
+    const roomW = 5, roomH = 5, paso = roomW + 2;
+
+    // reparte N alas horizontales en el alto disponible (cada una necesita
+    // sitio para una fila de habitaciones arriba y otra abajo)
+    const yMin = roomH + 3, yMax = h - roomH - 4;
+    const nBandas = Math.max(2, Math.min(4, Math.floor((yMax - yMin) / (roomH * 2 + 5)) + 1));
+    const bandas = [];
+    for (let i = 0; i < nBandas; i++)
+      bandas.push(Math.round(yMin + (nBandas === 1 ? 0 : (i * (yMax - yMin)) / (nBandas - 1))));
+
+    const midX = Math.floor(w / 2);
+    room(midX - 1, 2, 2, h - 4); // pasillo vertical, de punta a punta
+    for (const y of bandas) room(2, y - 1, w - 4, 2); // cada ala horizontal
+
+    const hubBanda = bandas[Math.floor(bandas.length / 2)];
+    const hubW = Math.min(w - 10, rng.int(8, 11)), hubH = Math.min(roomH * 2 + 1, rng.int(7, 9));
+    const hubX = midX - Math.floor(hubW / 2), hubY = hubBanda - Math.floor(hubH / 2);
+    room(hubX, hubY, hubW, hubH); // puesto de enfermería
+
+    const peineH = (y, x0, x1) => {
+      for (let x = x0; x + roomW <= x1; x += paso) {
+        const rw = rng.chance(0.2) ? roomW + 3 : roomW; // de vez en cuando, quirófano
+        const puerta = x + Math.floor(rw / 2);
+        if (y - 3 - roomH > 1) { room(x, y - 3 - roomH, rw, roomH); set(g, puerta, y - 2, T.SUELO); }
+        if (y + 2 + roomH < h - 1) { room(x, y + 2, rw, roomH); set(g, puerta, y + 1, T.SUELO); }
+      }
+    };
+    for (const y of bandas) {
+      if (y === hubBanda) {
+        peineH(y, 4, hubX - 2);
+        peineH(y, hubX + hubW + 2, w - roomW - 2);
+      } else {
+        peineH(y, 4, midX - 3);
+        peineH(y, midX + 3, w - roomW - 2);
+      }
+    }
+    return g;
+  }
+
+  // Habitaciones BSP + corredores (oficinas, hoteles)
   function genOficinas(w, h, rng) {
     const g = grid(w, h, T.PARED);
     const rooms = [];
@@ -220,7 +271,7 @@
           set(g, x + dx, y + dy, T.SUELO);
     };
     // corredor principal serpenteante: segmentos rectos largos con quiebros
-    let x = 4, y = rng.int(h / 3, (h * 2) / 3);
+    let x = 4, y = rng.int(Math.floor(h / 3), Math.floor((h * 2) / 3));
     let dirY = 0;
     const hitos = [[x, y]];
     while (x < w - 8) {
@@ -378,17 +429,21 @@
   }
 
   const GENS = {
-    pasillos: (w, h, rng, lv) => lv.id === 'level-0'
-      ? genPasillos(w, h, rng, {
-          salas: 16, salaMinW: 4, salaMaxW: 14,
-          salaMinH: 3, salaMaxH: 10, irregulares: true,
-          separacionSalas: 3,
-          atajos: Math.floor(w * 1.35),
-        })
-      : genPasillos(w, h, rng),
+    pasillos: (w, h, rng, lv) => {
+      const { grid: g, rects } = lv.id === 'level-0'
+        ? genPasillos(w, h, rng, {
+            salas: 16, salaMinW: 4, salaMaxW: 14,
+            salaMinH: 3, salaMaxH: 10, irregulares: true,
+            separacionSalas: 3,
+            atajos: Math.floor(w * 1.35),
+          })
+        : genPasillos(w, h, rng);
+      g._rects = rects;
+      return g;
+    },
     garaje: (w, h, rng) => genGaraje(w, h, rng),
     tuneles: (w, h, rng) => genTuneles(w, h, rng, { ancho: true }),
-    hospital: (w, h, rng) => genOficinas(w, h, rng),
+    hospital: (w, h, rng) => genHospital(w, h, rng),
     oficinas: (w, h, rng) => genOficinas(w, h, rng),
     exterior: (w, h, rng) => genExterior(w, h, rng),
     bosque: (w, h, rng, lv) => genBosque(w, h, rng, { lagos: (lv.reglas || []).includes('agua_traicionera') ? 5 : 2 }),
@@ -417,6 +472,16 @@
     return RNG.create(`${runSeed}::${levelDef.id}::caminata::${entry}::${attempt}`).int(a, b);
   }
 
+  // Permanencia en la Sala Manila: minutos reales, no turnos ni pasos. `seedKey`
+  // ya incluye partida/nivel/instancia — cada nueva estancia en la sala (attempt)
+  // vuelve a tirar dentro del rango declarado en la propia salida.
+  function manilaGoal(salidaDef, seedKey, attempt = 0) {
+    const range = salidaDef.permanenciaS || [180, 300];
+    const a = Math.max(1, Math.floor(range[0]));
+    const b = Math.max(a, Math.floor(range[1]));
+    return RNG.create(`${seedKey}::manila::${attempt}`).int(a, b);
+  }
+
   // ---------- generación completa de un nivel ----------
   function generate(levelDef, rng) {
     let [w, h] = levelDef.tam;
@@ -435,7 +500,8 @@
     keepLargest(g);
     let floors = collectFloors(g);
     if (floors.length < 60) { // mapa degenerado: reintenta con variante
-      g = genPasillos(w, h, rng, { salas: 10 });
+      const r = genPasillos(w, h, rng, { salas: 10 });
+      g = r.grid; g._rects = r.rects;
       keepLargest(g);
       floors = collectFloors(g);
     }
@@ -451,6 +517,7 @@
     const exits = [];
     const caminatas = []; // salidas SIN casilla: se cruzan caminando mucho
     const usable = [];
+    let manilaSalida = null; // salida SIN casilla: se cruza por PERMANENCIA en map.manila
     for (const source of levelDef.salidas || []) {
       if (source.tipo === 'void') continue;
       // Cada aparición tiene estado propio: romper una grieta no abre todas
@@ -458,7 +525,17 @@
       const s = { ...source, _mec: mecanicaDe(source), _abierta: false };
       if (s.prob !== undefined && !rng.chance(s.prob)) continue;
       if (s._mec === 'caminata') { caminatas.push(s); continue; }
+      if (s._mec === 'manila') { manilaSalida = s; continue; }
       usable.push(s);
+    }
+
+    // Sala Manila (Level 0): sala rara y tranquila, aparece con probabilidad
+    // baja y lejos del spawn — su presencia habilita la mecánica de permanencia
+    let manila = null;
+    if (manilaSalida && g._rects && g._rects.length && rng.chance(0.2)) {
+      const candidatas = g._rects.filter((r) =>
+        Math.hypot((r.x + r.w / 2) - spawn[0], (r.y + r.h / 2) - spawn[1]) > 12);
+      if (candidatas.length) manila = rng.pick(candidatas);
     }
     // pool ANCHO: toda casilla a más del 45% de la distancia máxima al spawn —
     // cubre regiones opuestas del nivel, no solo el rincón más profundo
@@ -470,6 +547,7 @@
     const esDeSuelo = (s) => s._mec !== 'romper' &&
       /suelo|caer|agujero|fosa|hoyo|trampilla|pozo|precipicio|fall|escalera|ascensor|elevador/i.test(s.texto || '');
     const puestas = [];
+    const keyCasilla = (p) => p[1] * g.w + p[0];
     const elegir = (pool) => {
       let best = null, bestScore = -1;
       for (const p of pool) {
@@ -488,13 +566,22 @@
       const p = elegir(pool);
       if (p) { puestas.push(p); exits.push({ x: p[0], y: p[1], def: s }); }
     }
+    const ocupadas = new Set(exits.map((e) => e.y * g.w + e.x));
+    const libre = (p) => p && !ocupadas.has(keyCasilla(p));
+    const reservar = (p) => { ocupadas.add(keyCasilla(p)); return p; };
+    const elegirLibre = (pool) => {
+      const libres = pool.filter(libre);
+      return libres.length ? rng.pick(libres) : null;
+    };
 
     // objetos
     const items = [];
     for (const o of levelDef.objetos || []) {
       const n = rng.int(o.n[0], o.n[1]);
       for (let i = 0; i < n; i++) {
-        const p = rng.pick(reach);
+        const p = elegirLibre(reach);
+        if (!p) continue;
+        reservar(p);
         items.push({ x: p[0], y: p[1], id: o.id });
       }
     }
@@ -512,38 +599,42 @@
       invernadero: 'cofre',
     };
     const props = [];
-    const exitKeys = new Set(exits.map((e) => e.y * g.w + e.x));
-    const libre = (p) => !exitKeys.has(p[1] * g.w + p[0]);
     // los muebles "de pared" van físicamente pegados a un muro (pared al norte)
     const PROPS_PARED = new Set(['taquilla', 'archivador', 'nevera', 'reloj', 'camilla', 'farola']);
     const conParedNorte = reach.filter(([x, y]) => at(g, x, y - 1) === T.PARED);
-    const sitioPara = (id) =>
-      PROPS_PARED.has(id) && conParedNorte.length ? rng.pick(conParedNorte) : rng.pick(reach);
+    const sitioPara = (id) => {
+      const pool = PROPS_PARED.has(id) && conParedNorte.length ? conParedNorte : reach;
+      return elegirLibre(pool);
+    };
     const decorativos = PROPS_BIOMA[levelDef.bioma] ?? [];
     if (decorativos.length) {
       const n = rng.int(7, 13);
       for (let i = 0; i < n; i++) {
         const id = rng.pick(decorativos);
         const p = sitioPara(id);
-        if (!libre(p)) continue;
+        if (!p) continue;
+        reservar(p);
         // las cajas de madera SIEMPRE se pueden registrar (v17): nada de
         // decoración que parece un contenedor y frustra al clicarla
         const esCont = id === 'caja';
         props.push({ x: p[0], y: p[1], id, contenedor: esCont, registrado: esCont ? false : undefined });
       }
     }
-    const nCont = rng.int(3, 5);
+    const rangoCont = levelDef.contenedores ?? [3, 5];
+    const nCont = rng.int(rangoCont[0], rangoCont[1]);
     for (let i = 0; i < nCont; i++) {
       const id = CONT_BIOMA[levelDef.bioma] ?? 'cofre';
       const p = sitioPara(id);
-      if (!libre(p)) continue;
+      if (!p) continue;
+      reservar(p);
       props.push({ x: p[0], y: p[1], id, contenedor: true, registrado: false });
     }
     // el reloj es exclusivo de Level 80 — SIEMPRE colgado de una pared
     if (levelDef.id === 'level-80') {
       for (let i = 0; i < 6; i++) {
         const p = sitioPara('reloj');
-        if (!libre(p)) continue;
+        if (!p) continue;
+        reservar(p);
         props.push({ x: p[0], y: p[1], id: 'reloj', contenedor: false });
       }
     }
@@ -560,8 +651,8 @@
       }
     }
 
-    return { w, h, grid: g, spawn, exits, items, entitySpawns, props, dist, caminatas };
+    return { w, h, grid: g, spawn, exits, items, entitySpawns, props, dist, caminatas, manila, manilaSalida };
   }
 
-  window.MapGen = { T, generate, walkable, at, bfsDist, mecanicaDe, walkingGoal };
+  window.MapGen = { T, generate, walkable, at, bfsDist, mecanicaDe, walkingGoal, manilaGoal };
 })();

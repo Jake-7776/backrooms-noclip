@@ -15,15 +15,27 @@
   } catch (e) {}
   let ambientStop = null;
   let ambientAudioEl = null;
+  let menuAudioEl = null;
+  let menuAudioSrc = null;
   let idleStop = null;
   const overrides = {};
+  const entityLoops = {};
 
-  const NOMBRES = ['paso', 'golpe', 'dano', 'recoger', 'dado', 'puerta', 'registrar', 'muerte', 'victoria', 'latido', 'ui', 'derrumbe', 'bisturi', 'crujido'];
-  for (const n of NOMBRES) {
-    for (const ext of ['mp3', 'ogg', 'wav']) {
+  // Overrides mp3/ogg/wav de game/assets/sounds/ — SOLO los que existen según
+  // el manifiesto de assets (v30.6: antes se sondeaban 15 nombres × 3
+  // extensiones × 2 rutas al cargar la página → lluvia de 404 en la portada).
+  // Se cargan al primer gesto (unlock) o al entrar en partida, no en el
+  // título; hasta entonces suena la síntesis WebAudio de siempre.
+  // Tras añadir/quitar sonidos: node pipeline/build-assets-manifest.js
+  let overridesCargados = false;
+  function cargarOverrides() {
+    if (overridesCargados) return;
+    overridesCargados = true;
+    const M = (window.ASSETS_MANIFEST || {}).sonidos || {};
+    for (const [n, ruta] of Object.entries(M)) {
       const el = new window.Audio();
       el.addEventListener('canplaythrough', () => { if (!overrides[n]) overrides[n] = el; }, { once: true });
-      el.src = 'assets/sounds/' + n + '.' + ext;
+      el.src = ruta;
       el.preload = 'auto';
     }
   }
@@ -47,6 +59,7 @@
 
   function unlock() {
     try {
+      cargarOverrides(); // primer gesto: momento perfecto para traer los mp3
       if (!ensure()) return;
       if (ctx.state === 'suspended') ctx.resume();
     } catch (e) {}
@@ -165,15 +178,78 @@
   function cue(glyph) {
     try {
       if (muted || !ctx) return;
+      if (overrides[glyph]) { play(glyph); return; }
       (CUES[glyph] ?? CUES.generico)();
     } catch (e) {}
+  }
+
+  function cueDist(glyph, distancia, radio = 8) {
+    try {
+      if (muted || !ctx) return;
+      const k = Math.max(0, Math.min(1, 1 - distancia / radio));
+      if (k <= 0) return;
+      const ov = overrides[glyph];
+      if (ov) {
+        const el = ov.cloneNode();
+        el.volume = Math.min(1, vol * volFx * (0.08 + k * k * 0.92));
+        el.play().catch(() => {});
+        return;
+      }
+      const old = sfxBus.gain.value;
+      sfxBus.gain.value = old * (0.15 + k * 0.85);
+      (CUES[glyph] ?? CUES.generico)();
+      setTimeout(() => { if (sfxBus) sfxBus.gain.value = old; }, 120);
+    } catch (e) {}
+  }
+
+  function entityLoop(glyph, distancia, radio = 8) {
+    try {
+      const k = Math.max(0, Math.min(1, 1 - distancia / radio));
+      const objetivo = muted ? 0 : Math.min(1, vol * volFx * (k * k));
+      const loop = entityLoops[glyph] || (entityLoops[glyph] = { el: null, vol: 0, last: 0 });
+      loop.last = performance.now();
+      const ov = overrides[glyph];
+      if (!ov) {
+        if (k > 0.12 && ctx) cueDist(glyph, distancia, radio);
+        return;
+      }
+      if (!loop.el || loop.el.src !== ov.src) {
+        if (loop.el) { loop.el.pause(); loop.el.src = ''; }
+        loop.el = ov.cloneNode();
+        loop.el.loop = true;
+        loop.el.volume = 0;
+      }
+      loop.vol = loop.vol * 0.86 + objetivo * 0.14;
+      loop.el.volume = Math.max(0, Math.min(1, loop.vol));
+      if (loop.vol > 0.01 && loop.el.paused) loop.el.play().catch(() => {});
+      if (loop.vol <= 0.003 && !loop.el.paused) loop.el.pause();
+    } catch (e) {}
+  }
+
+  function updateEntityLoops() {
+    const now = performance.now();
+    for (const loop of Object.values(entityLoops)) {
+      if (!loop.el) continue;
+      if (now - loop.last < 180) continue;
+      loop.vol *= 0.86;
+      loop.el.volume = Math.max(0, Math.min(1, loop.vol));
+      if (loop.vol <= 0.003 && !loop.el.paused) loop.el.pause();
+    }
   }
 
   function play(nombre, arg) {
     try {
       if (muted) return;
       const ov = overrides[nombre];
-      if (ov) { const el = ov.cloneNode(); el.volume = vol; el.play().catch(() => {}); return; }
+      if (ov) {
+        const el = ov.cloneNode();
+        el.volume = Math.min(1, vol * volFx);
+        // pequeña variación de tono/velocidad para que los pasos (mismo clip
+        // repetido) no suenen a metralleta idéntica en cada zancada
+        if (nombre === 'paso') el.playbackRate = 0.88 + Math.random() * 0.24;
+        el.play().catch(() => {});
+        return;
+      }
       if (!ctx) return;
       SYNTH[nombre]?.(arg);
     } catch (e) {}
@@ -466,14 +542,14 @@
       stopAmbient();
       if (muted) return;
       const gen = ++ambientGen;
-      // 1) archivo del nivel (del usuario o de la wiki): prueba extensiones en cadena
+      // 1) archivo del nivel (del usuario o de la wiki) — SOLO rutas que
+      // existen según los manifiestos (v30.6: antes se probaban 3 extensiones
+      // a ciegas al entrar a cada nivel → 404 en consola)
       const candidatos = [];
       const wikiSrc = (window.AUDIO_MANIFEST || {})[levelDef.id];
       if (wikiSrc) candidatos.push(wikiSrc);
-      for (const ext of ['mp3', 'wav', 'ogg']) {
-        const ruta = `assets/sounds/niveles/${levelDef.id}.${ext}`;
-        if (ruta !== wikiSrc) candidatos.push(ruta);
-      }
+      const local = ((window.ASSETS_MANIFEST || {}).ambientes || {})[levelDef.id];
+      if (local && local !== wikiSrc) candidatos.push(local);
       let i = 0;
       let synthHecho = false;
       const intenta = () => {
@@ -528,6 +604,7 @@
       if (ambBus) ambBus.gain.value = volAmb;
     }
     if (ambientAudioEl) ambientAudioEl.volume = Math.min(1, 0.62 * vol * volAmb);
+    if (menuAudioEl) menuAudioEl.volume = Math.min(1, 0.62 * vol * volAmb);
   }
 
   // pad suave para la tarjeta entre niveles y pantallas de fin
@@ -564,18 +641,59 @@
     } catch (e) {}
   }
 
+  function playMenu(src) {
+    // Si viene la misma canción y ya está sonando, no reiniciar
+    if (menuAudioSrc === src && menuAudioEl) return;
+    
+    stopMenu();
+    menuAudioSrc = src;
+    if (!src || muted || !ctx) {
+      return;
+    }
+    try {
+      const el = new window.Audio(src);
+      el.loop = true;
+      el.volume = Math.min(1, 0.62 * vol * volAmb);
+      // la referencia se guarda SÍNCRONA (antes se asignaba al resolverse
+      // play() — un stopMenu() en esa ventana no encontraba nada que parar
+      // y la pista quedaba sonando huérfana dentro de la partida)
+      menuAudioEl = el;
+      el.play().catch(() => { if (menuAudioEl === el) menuAudioEl = null; });
+    } catch (e) {}
+  }
+
+  function stopMenu() {
+    if (menuAudioEl) {
+      try {
+        menuAudioEl.pause();
+        menuAudioEl.src = '';
+      } catch (e) {}
+      menuAudioEl = null;
+    }
+    menuAudioSrc = null;
+  }
+
   function toggleMute() {
     muted = !muted;
     try { localStorage.setItem('backrooms-mute', muted ? '1' : '0'); } catch (e) {}
     if (master) master.gain.value = muted ? 0 : vol;
-    if (muted) stopAmbient();
-    else if (window.Game?.world?.level) ambient(window.Game.world.level);
+    if (muted) {
+      for (const loop of Object.values(entityLoops)) if (loop.el) loop.el.pause();
+      stopAmbient();
+      if (menuAudioEl) {
+        try { menuAudioEl.pause(); } catch (e) {}
+        menuAudioEl = null;
+      }
+    } else {
+      if (window.Game?.world?.level) ambient(window.Game.world.level);
+      if (menuAudioSrc) playMenu(menuAudioSrc);
+    }
     return muted;
   }
 
   window.Sfx = {
-    unlock, play, cue, ambient, stopAmbient, toggleMute, setVolume, idle,
-    level0Flicker,
+    unlock, cargarOverrides, play, cue, cueDist, entityLoop, updateEntityLoops, ambient, stopAmbient, toggleMute, setVolume, idle,
+    level0Flicker, playMenu, stopMenu,
     get muted() { return muted; },
     get volumen() { return vol; },
     get volumenFx() { return volFx; },
